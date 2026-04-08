@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { cn, fmtDate, timeAgo, tempColor, tempLabel } from '@/lib/utils';
 import { STATUS_LABELS, STATUS_COLORS, INTERACTION_LABELS } from '@/lib/constants';
-import { copyToClipboard, openFileLocation } from '@/lib/tauri';
+import { isTauri, copyToClipboard, openFileLocation } from '@/lib/tauri';
 import { useToast } from '@/lib/toast';
 import { useUpdateClient, useUpdateQuote, useAddInteraction } from '@/lib/data';
 import InteractionLogger from '@/components/InteractionLogger';
@@ -402,27 +402,33 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
               </button>
             )}
             {quote.local_file_path && (
-              <>
-                <button
-                  onClick={async () => {
-                    const ok = await copyToClipboard(quote.local_file_path!);
-                    toast(ok ? 'הנתיב הועתק' : 'ההעתקה נכשלה', ok ? 'success' : 'error');
-                  }}
-                  className="rounded-lg border border-(--color-border) px-3 py-1.5 text-xs font-medium text-(--color-text-secondary) hover:bg-(--color-surface-dim) transition-colors"
-                  title={quote.local_file_path}
-                >
-                  העתק נתיב
-                </button>
-                <button
-                  onClick={async () => {
-                    const ok = await openFileLocation(quote.local_file_path!);
-                    if (!ok) toast('לא ניתן לפתוח תיקייה', 'error');
-                  }}
-                  className="rounded-lg border border-(--color-border) px-3 py-1.5 text-xs font-medium text-(--color-text-secondary) hover:bg-(--color-surface-dim) transition-colors"
-                >
-                  פתח תיקייה
-                </button>
-              </>
+              isTauri ? (
+                <>
+                  <button
+                    onClick={async () => {
+                      const ok = await copyToClipboard(quote.local_file_path!);
+                      toast(ok ? 'הנתיב הועתק' : 'ההעתקה נכשלה', ok ? 'success' : 'error');
+                    }}
+                    className="rounded-lg border border-(--color-border) px-3 py-1.5 text-xs font-medium text-(--color-text-secondary) hover:bg-(--color-surface-dim) transition-colors"
+                    title={quote.local_file_path}
+                  >
+                    העתק נתיב
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const ok = await openFileLocation(quote.local_file_path!);
+                      if (!ok) toast('לא ניתן לפתוח תיקייה', 'error');
+                    }}
+                    className="rounded-lg border border-(--color-border) px-3 py-1.5 text-xs font-medium text-(--color-text-secondary) hover:bg-(--color-surface-dim) transition-colors"
+                  >
+                    פתח תיקייה
+                  </button>
+                </>
+              ) : (
+                <span className="rounded-lg border border-dashed border-(--color-border) px-3 py-1.5 text-xs text-(--color-text-secondary)/60">
+                  קבצים מקומיים נגישים רק ממחשב המשרד
+                </span>
+              )
             )}
           </div>
         </div>
@@ -463,7 +469,7 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
             <div className="flex items-center gap-2 pt-1">
               <button
                 onClick={saveDeferral}
-                disabled={!deferReason.trim() || addInteraction.isPending || updateQuote.isPending}
+                disabled={!deferReason.trim() || !deferWakeUp || addInteraction.isPending || updateQuote.isPending}
                 className="rounded-lg bg-(--color-warning) px-4 py-2 text-sm font-semibold text-white transition-opacity disabled:opacity-30 hover:opacity-90"
               >
                 {(addInteraction.isPending || updateQuote.isPending) ? '...' : 'דחה'}
@@ -474,7 +480,13 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
               >
                 ביטול
               </button>
-              <span className="mr-auto text-[10px] text-(--color-text-secondary)/40">Ctrl+Enter לשמירה</span>
+              {(!deferReason.trim() || !deferWakeUp) ? (
+                <span className="mr-auto text-[10px] font-semibold text-(--color-warning)">
+                  {!deferReason.trim() ? 'חובה סיבה' : 'חובה תאריך התעוררות'}
+                </span>
+              ) : (
+                <span className="mr-auto text-[10px] text-(--color-text-secondary)/40">Ctrl+Enter לשמירה</span>
+              )}
             </div>
           </div>
         )}

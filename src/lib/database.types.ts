@@ -84,6 +84,7 @@ export interface Quote {
   id: string;
   quote_number: string;
   client_id: string;
+  unified_id: string | null;
   status: QuoteStatus;
   temperature: number;
   local_file_path: string | null;
@@ -177,7 +178,12 @@ export interface Database {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      find_quote_by_unified_id: {
+        Args: { p_erp_number: string; p_initials: string; p_quote_number: string };
+        Returns: string | null;
+      };
+    };
     Enums: {
       user_role: UserRole;
       week_status: WeekStatus;

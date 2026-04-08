@@ -1,4 +1,4 @@
-import { cn, tempLabel } from '@/lib/utils';
+import { cn, tempLabel, effectiveTemperature } from '@/lib/utils';
 import type { Quote, Client } from '@/lib/database.types';
 
 interface CopilotBriefingProps {
@@ -10,14 +10,28 @@ export default function CopilotBriefing({ quotes, onFocusQuote }: CopilotBriefin
   if (!quotes || quotes.length === 0) return null;
 
   const today = new Date().toISOString().slice(0, 10);
+  const active = (q: Quote) => !['won', 'lost', 'dormant'].includes(q.status);
 
   // Buckets
   const overdueFollowUps = quotes.filter(
-    (q) => q.follow_up_date && q.follow_up_date <= today && !['won', 'lost', 'dormant'].includes(q.status),
+    (q) => q.follow_up_date && q.follow_up_date <= today && active(q),
   );
   const hotQuotes = quotes.filter(
-    (q) => q.temperature >= 4 && !['won', 'lost', 'dormant'].includes(q.status),
+    (q) => q.temperature >= 4 && active(q),
   );
+
+  // Smart Triage: flag quotes whose effective temperature decayed due to staleness
+  const coolingQuotes = quotes.filter((q) => {
+    if (!active(q)) return false;
+    const eff = effectiveTemperature(q.temperature, q.days_since_contact);
+    return eff < q.temperature; // temperature dropped due to inactivity
+  });
+
+  // Critical: effective temp dropped by 2+ (stale / critical)
+  const criticalCooling = coolingQuotes.filter(
+    (q) => q.temperature - effectiveTemperature(q.temperature, q.days_since_contact) >= 2,
+  );
+
   const forgotten = quotes.filter(
     (q) =>
       (q.days_since_contact ?? 0) >= 4 &&
@@ -35,8 +49,25 @@ export default function CopilotBriefing({ quotes, onFocusQuote }: CopilotBriefin
       severity: 'danger',
     });
     for (const q of hotQuotes.slice(0, 3)) {
+      const eff = effectiveTemperature(q.temperature, q.days_since_contact);
+      const decayNote = eff < q.temperature ? ` [ירד ל-${tempLabel(eff)}]` : '';
       lines.push({
-        text: `${q.quote_number} (${q.client?.code ?? '?'}) — ${tempLabel(q.temperature)}`,
+        text: `${q.quote_number} (${q.client?.code ?? '?'}) — ${tempLabel(q.temperature)}${decayNote}`,
+        quoteId: q.id,
+        severity: 'danger',
+      });
+    }
+  }
+
+  if (criticalCooling.length > 0) {
+    lines.push({
+      text: `${criticalCooling.length} הצעות מתקררות — לא טופלו יותר מ-7 ימים`,
+      severity: 'danger',
+    });
+    for (const q of criticalCooling.slice(0, 3)) {
+      const eff = effectiveTemperature(q.temperature, q.days_since_contact);
+      lines.push({
+        text: `${q.quote_number} — ${tempLabel(q.temperature)} → ${tempLabel(eff)} (${q.days_since_contact} ימים)`,
         quoteId: q.id,
         severity: 'danger',
       });

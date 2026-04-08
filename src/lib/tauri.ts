@@ -4,7 +4,7 @@
  * When running in browser (npm run dev), falls back gracefully.
  */
 
-const isTauri = '__TAURI_INTERNALS__' in window;
+export const isTauri = '__TAURI_INTERNALS__' in window;
 
 /** Invoke a Tauri command with fallback for web dev */
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {

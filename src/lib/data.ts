@@ -186,6 +186,78 @@ export function useAddCapture() {
 }
 
 // ============================================================
+//  Quote creation with Unified ID de-duplication
+// ============================================================
+
+/** Build the unified ID locally for display / pre-check */
+export function buildUnifiedId(erpNumber: string | null, initials: string | null, quoteNumber: string): string {
+  return `${erpNumber ?? 'NO-ERP'}-${initials ?? 'XX'}-${quoteNumber}`;
+}
+
+/**
+ * Create a quote with anti-duplication.
+ * If [ERP]-[Initials]-[QuoteNumber] already exists, silently returns the
+ * existing quote ID so the caller can link the interaction there instead.
+ */
+export function useCreateQuote() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async ({
+      quoteNumber,
+      clientId,
+      erpNumber,
+      initials,
+      localFilePath,
+    }: {
+      quoteNumber: string;
+      clientId: string;
+      erpNumber: string | null;
+      initials: string | null;
+      localFilePath?: string;
+    }): Promise<{ id: string; merged: boolean }> => {
+      // 1. Check for existing quote via Supabase RPC
+      const { data: existingId, error: rpcErr } = await supabase.rpc(
+        'find_quote_by_unified_id',
+        {
+          p_erp_number: erpNumber ?? 'NO-ERP',
+          p_initials: initials ?? 'XX',
+          p_quote_number: quoteNumber,
+        },
+      );
+
+      if (rpcErr) throw new Error(rpcErr.message);
+
+      // 2. If exists — silently return existing ID (merge/link)
+      if (existingId) {
+        return { id: existingId as string, merged: true };
+      }
+
+      // 3. Create new quote
+      const { data, error } = await supabase
+        .from('quotes')
+        .insert({
+          quote_number: quoteNumber,
+          client_id: clientId,
+          local_file_path: localFilePath ?? null,
+          status: 'new',
+          opened_at: new Date().toISOString().slice(0, 10),
+          created_by: user?.id ?? null,
+        })
+        .select()
+        .single();
+
+      if (error) throw new Error(error.message);
+      return { id: (data as Quote).id, merged: false };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['quotes'] });
+    },
+  });
+}
+
+// ============================================================
 //  Quote mutations
 // ============================================================
 

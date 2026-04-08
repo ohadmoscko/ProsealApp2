@@ -119,7 +119,10 @@ export default function InteractionLogger({ quoteId, type, onClose }: Interactio
 
   // Phase 2: note + what-next
   const showNote     = !needsOutcome || outcome === 'reached' || outcome === 'unavailable';
-  const showFollowUp = !needsOutcome || outcome === 'reached';
+  const showFollowUp = !needsOutcome || outcome === 'reached' || outcome === 'unavailable';
+  // When user marks "unavailable" (a deferred task), follow-up date is mandatory
+  const requireFollowUp = outcome === 'unavailable';
+  const hasFollowUp = !!(followUp || customDate);
 
   return (
     <div className="border-t border-(--color-border) bg-(--color-surface-dim) px-6 py-4 space-y-3 animate-fade-in">
@@ -184,7 +187,11 @@ export default function InteractionLogger({ quoteId, type, onClose }: Interactio
       <div className="flex items-center gap-2 pt-1">
         <button
           onClick={handleSave}
-          disabled={addInteraction.isPending || (showNote && type !== 'note' && !note.trim() && outcome === 'reached')}
+          disabled={
+            addInteraction.isPending ||
+            (showNote && type !== 'note' && !note.trim() && outcome === 'reached') ||
+            (requireFollowUp && !hasFollowUp)
+          }
           className="rounded-lg bg-(--color-accent) px-4 py-2 text-sm font-semibold text-white transition-opacity disabled:opacity-30 hover:opacity-90"
         >
           {addInteraction.isPending ? '...' : 'שמור'}
@@ -195,7 +202,10 @@ export default function InteractionLogger({ quoteId, type, onClose }: Interactio
         >
           ביטול
         </button>
-        {showNote && (
+        {requireFollowUp && !hasFollowUp && (
+          <span className="mr-auto text-[10px] font-semibold text-(--color-warning)">חובה לבחור תאריך מעקב</span>
+        )}
+        {showNote && !(requireFollowUp && !hasFollowUp) && (
           <span className="mr-auto text-[10px] text-(--color-text-secondary)/40">Ctrl+Enter לשמירה מהירה</span>
         )}
       </div>

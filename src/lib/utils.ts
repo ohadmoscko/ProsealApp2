@@ -48,6 +48,28 @@ export function tempColor(temp: number): string {
   return 'text-zinc-400';
 }
 
+/**
+ * Dynamic temperature decay based on days since last contact.
+ * Returns the effective temperature (may be lower than stored value)
+ * when a quote has gone stale without follow-up.
+ *
+ * Default decay thresholds (days → temperature penalty):
+ *   0-3 days:  no change
+ *   4-6 days:  -1
+ *   7-13 days: -2
+ *   14+ days:  -3
+ *
+ * Minimum effective temperature is always 1.
+ */
+export function effectiveTemperature(storedTemp: number, daysSinceContact: number | null): number {
+  if (daysSinceContact == null || daysSinceContact <= 3) return storedTemp;
+  let penalty = 0;
+  if (daysSinceContact >= 14) penalty = 3;
+  else if (daysSinceContact >= 7) penalty = 2;
+  else if (daysSinceContact >= 4) penalty = 1;
+  return Math.max(1, storedTemp - penalty);
+}
+
 /** Temperature (1-5) to Hebrew label */
 export function tempLabel(temp: number): string {
   const labels: Record<number, string> = {
