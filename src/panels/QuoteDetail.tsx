@@ -498,9 +498,21 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
                   </button>
                 </>
               ) : (
-                <span className="rounded-lg border border-dashed border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/20 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-400">
-                  גישה לקבצים מקומיים מוגבלת לרשת המשרד. יש להשתמש ב-VPN או לעבוד מעמדת המשרד לצפייה ב-PDF
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-lg border border-dashed border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/20 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+                    גישה לקבצים מוגבלת במצב ענן. יש לבקש גישה דרך ה-ERP או להתחבר דרך VPN
+                  </span>
+                  <button
+                    onClick={async () => {
+                      const ok = await copyToClipboard(quote.local_file_path!);
+                      toast(ok ? 'הנתיב הועתק — השתמש ב-VPN לשליפה' : 'ההעתקה נכשלה', ok ? 'success' : 'error');
+                    }}
+                    className="shrink-0 rounded-lg border border-amber-300 dark:border-amber-700 px-3 py-1.5 text-xs font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/20 transition-colors"
+                    title={quote.local_file_path}
+                  >
+                    העתק נתיב
+                  </button>
+                </div>
               )
             )}
           </div>
