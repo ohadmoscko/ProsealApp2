@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { cn, tempColor, timeAgo, tempLabel } from '@/lib/utils';
 import { STATUS_LABELS, STRATEGIC_RANK_LABELS } from '@/lib/constants';
-import { useRefreshSummary } from '@/lib/data';
+import { useRefreshSummary, useLogTelemetry } from '@/lib/data';
 import type { Quote, Client } from '@/lib/database.types';
 
 interface AiInternAccordionProps {
@@ -16,6 +16,18 @@ interface AiInternAccordionProps {
 export default function AiInternAccordion({ quotes, onFocusQuote }: AiInternAccordionProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const refreshSummary = useRefreshSummary();
+  const logTelemetry = useLogTelemetry();
+
+  /** Expand/collapse with telemetry tracking */
+  function toggleExpand(quoteId: string, temperature: number) {
+    const wasExpanded = expandedId === quoteId;
+    setExpandedId(wasExpanded ? null : quoteId);
+    logTelemetry.mutate({
+      quoteId,
+      action: wasExpanded ? 'collapse' : 'expand',
+      metadata: { temperature },
+    });
+  }
 
   const activeQuotes = quotes.filter((q) => !['won', 'lost', 'dormant'].includes(q.status));
 
@@ -50,7 +62,7 @@ export default function AiInternAccordion({ quotes, onFocusQuote }: AiInternAcco
             <div key={q.id}>
               {/* Collapsed row: one-liner */}
               <button
-                onClick={() => setExpandedId(isExpanded ? null : q.id)}
+                onClick={() => toggleExpand(q.id, q.temperature)}
                 className="w-full px-6 py-2.5 text-right flex items-center gap-3 hover:bg-(--color-surface-dim)/60 transition-colors"
               >
                 <span className={cn('text-xs font-bold shrink-0', tempColor(q.temperature))}>
@@ -91,7 +103,11 @@ export default function AiInternAccordion({ quotes, onFocusQuote }: AiInternAcco
                       )}
                     </div>
                     <button
-                      onClick={(e) => { e.stopPropagation(); refreshSummary.mutate({ quoteId: q.id }); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        refreshSummary.mutate({ quoteId: q.id });
+                        logTelemetry.mutate({ quoteId: q.id, action: 'refresh', metadata: { temperature: q.temperature } });
+                      }}
                       disabled={refreshSummary.isPending}
                       className="text-[10px] text-(--color-accent) hover:text-(--color-accent)/80 disabled:opacity-40 shrink-0"
                     >
@@ -113,7 +129,10 @@ export default function AiInternAccordion({ quotes, onFocusQuote }: AiInternAcco
 
                   {/* Drill-down button */}
                   <button
-                    onClick={() => onFocusQuote(q.id)}
+                    onClick={() => {
+                      logTelemetry.mutate({ quoteId: q.id, action: 'drill_down', metadata: { temperature: q.temperature, status: q.status } });
+                      onFocusQuote(q.id);
+                    }}
                     className="text-xs font-semibold text-(--color-accent) hover:text-(--color-accent)/80 transition-colors"
                   >
                     פתח הצעה מלאה

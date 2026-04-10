@@ -6,7 +6,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { useAuth } from './auth';
-import type { Quote, Client, Interaction, Capture, InteractionType, InteractionOutcome, DeferReasonCategory, ReleaseStatus } from './database.types';
+import type { Quote, Client, Interaction, Capture, InteractionType, InteractionOutcome, DeferReasonCategory, ReleaseStatus, TelemetryAction } from './database.types';
 
 // ============================================================
 //  Queued Release: weekend notes → released Sunday 08:00
@@ -344,6 +344,43 @@ export function useRefreshSummary() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['quotes'] });
     },
+  });
+}
+
+// ============================================================
+//  AI Training Telemetry: track CEO behavior for AI learning
+// ============================================================
+
+/**
+ * Fire-and-forget telemetry event.
+ * Logs CEO interactions with the AI accordion (expand, pin, refresh, drill-down)
+ * to the ai_training_telemetry table for future model tuning.
+ */
+export function useLogTelemetry() {
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async ({
+      quoteId,
+      action,
+      metadata,
+    }: {
+      quoteId: string;
+      action: TelemetryAction;
+      metadata?: Record<string, unknown>;
+    }) => {
+      const { error } = await supabase
+        .from('ai_training_telemetry')
+        .insert({
+          quote_id: quoteId,
+          user_id: user?.id ?? null,
+          action_type: action,
+          metadata: metadata ?? {},
+        });
+
+      if (error) throw new Error(error.message);
+    },
+    // Silent — no cache invalidation needed, pure background logging
   });
 }
 

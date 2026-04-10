@@ -9,6 +9,7 @@ export type CaptureStatus = 'pending' | 'processed' | 'in_report' | 'dismissed';
 export type InteractionOutcome = 'reached' | 'no_answer' | 'unavailable';
 export type DeferReasonCategory = 'client_abroad' | 'awaiting_technical' | 'price_objection' | 'busy_period' | 'other';
 export type ReleaseStatus = 'immediate' | 'pending' | 'released';
+export type TelemetryAction = 'expand' | 'collapse' | 'pin' | 'unpin' | 'refresh' | 'drill_down';
 
 export interface Profile {
   id: string;
@@ -123,6 +124,15 @@ export interface Interaction {
   created_at: string;
 }
 
+export interface AiTrainingTelemetry {
+  id: string;
+  quote_id: string;
+  user_id: string | null;
+  action_type: TelemetryAction;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface Capture {
   id: string;
   raw_text: string;
@@ -194,6 +204,12 @@ export interface Database {
         Row: Capture;
         Insert: InsertRow<Capture, 'raw_text'>;
         Update: Partial<Capture>;
+        Relationships: [];
+      };
+      ai_training_telemetry: {
+        Row: AiTrainingTelemetry;
+        Insert: InsertRow<AiTrainingTelemetry, 'quote_id' | 'action_type'>;
+        Update: Partial<AiTrainingTelemetry>;
         Relationships: [];
       };
     };
