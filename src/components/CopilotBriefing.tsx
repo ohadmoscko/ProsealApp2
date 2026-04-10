@@ -111,8 +111,8 @@ export default function CopilotBriefing({ quotes, onFocusQuote }: CopilotBriefin
   }
 
   return (
-    <div className="border-b border-(--color-border) bg-(--color-surface-dim) px-6 py-3">
-      <div className="flex items-center gap-2 mb-1.5">
+    <div className="flex-1 min-w-0">
+      <div className="flex items-center gap-2 mb-1">
         <span className="text-xs font-bold text-(--color-text-secondary)">תדריך בוקר</span>
         <span className="text-[10px] text-(--color-text-secondary)/40">{activeCount} הצעות פעילות</span>
       </div>

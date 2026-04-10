@@ -1,4 +1,4 @@
-import type { QuoteStatus, InteractionType } from './database.types';
+import type { QuoteStatus, InteractionType, DeferReasonCategory } from './database.types';
 
 export const STATUS_LABELS: Record<QuoteStatus, string> = {
   new: 'חדש',
@@ -26,4 +26,20 @@ export const INTERACTION_LABELS: Record<InteractionType, string> = {
   email: 'מייל',
   note: 'הערה',
   system: 'מערכת',
+};
+
+/** Strategic rank labels (1-3) — replaces financial amounts in CEO view */
+export const STRATEGIC_RANK_LABELS: Record<number, string> = {
+  1: 'קריטי',
+  2: 'חשוב',
+  3: 'שגרתי',
+};
+
+/** Defer reason categories — required before snoozing a quote */
+export const DEFER_REASON_LABELS: Record<DeferReasonCategory, string> = {
+  client_abroad: 'הלקוח בחו״ל',
+  awaiting_technical: 'ממתין לאישור טכני',
+  price_objection: 'יקר לו',
+  busy_period: 'תקופה עמוסה',
+  other: 'אחר',
 };

@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { cn, fmtDate, timeAgo, tempColor, tempLabel } from '@/lib/utils';
-import { STATUS_LABELS, STATUS_COLORS, INTERACTION_LABELS } from '@/lib/constants';
+import { STATUS_LABELS, STATUS_COLORS, INTERACTION_LABELS, STRATEGIC_RANK_LABELS, DEFER_REASON_LABELS } from '@/lib/constants';
 import { isTauri, copyToClipboard, openFileLocation } from '@/lib/tauri';
 import { useToast } from '@/lib/toast';
 import { useUpdateClient, useUpdateQuote, useAddInteraction } from '@/lib/data';
 import InteractionLogger from '@/components/InteractionLogger';
-import type { Quote, Client, Interaction, InteractionType, QuoteStatus } from '@/lib/database.types';
+import type { Quote, Client, Interaction, InteractionType, QuoteStatus, DeferReasonCategory } from '@/lib/database.types';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -16,12 +16,12 @@ interface QuoteDetailProps {
 
 // ── Timeline grouping ──────────────────────────────────────────────────────
 
-type TimelineRow =
+type RawTimelineRow =
   | { kind: 'single'; interaction: Interaction }
-  | { kind: 'failed-group'; interactions: Interaction[]; expanded: boolean };
+  | { kind: 'failed-group'; interactions: Interaction[] };
 
-function buildTimeline(interactions: Interaction[]): Omit<TimelineRow, 'expanded'>[] {
-  const rows: Omit<TimelineRow, 'expanded'>[] = [];
+function buildTimeline(interactions: Interaction[]): RawTimelineRow[] {
+  const rows: RawTimelineRow[] = [];
   let i = 0;
 
   while (i < interactions.length) {
@@ -92,6 +92,7 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
 
   // Defer panel
   const [showDeferPanel, setShowDeferPanel] = useState(false);
+  const [deferCategory, setDeferCategory] = useState<DeferReasonCategory | null>(null);
   const [deferReason, setDeferReason] = useState('');
   const [deferWakeUp, setDeferWakeUp] = useState('');
 
@@ -151,16 +152,29 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
     }
   }
 
+  async function changeStrategicRank(rank: number | null) {
+    if (rank === quote.strategic_rank) rank = null; // toggle off
+    try {
+      await updateQuote.mutateAsync({ id: quote.id, fields: { strategic_rank: rank } });
+      toast(rank ? `דירוג: ${STRATEGIC_RANK_LABELS[rank]}` : 'דירוג הוסר', 'success');
+    } catch {
+      toast('שגיאה בעדכון דירוג', 'error');
+    }
+  }
+
   async function saveDeferral() {
+    if (!deferCategory) return;
+    const categoryLabel = DEFER_REASON_LABELS[deferCategory];
     const reason = deferReason.trim();
-    if (!reason) return;
+    const content = reason ? `נדחה (${categoryLabel}): ${reason}` : `נדחה: ${categoryLabel}`;
     try {
       await addInteraction.mutateAsync({
         quoteId: quote.id,
         type: 'note',
-        content: `נדחה: ${reason}`,
+        content,
         outcome: undefined,
         followUpDate: deferWakeUp || null,
+        deferCategory,
       });
       await updateQuote.mutateAsync({
         id: quote.id,
@@ -171,6 +185,7 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
       });
       toast('ההצעה נדחתה', 'success');
       setShowDeferPanel(false);
+      setDeferCategory(null);
       setDeferReason('');
       setDeferWakeUp('');
     } catch {
@@ -203,9 +218,15 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
     }
   }
 
+  /** WhatsApp "fire-and-forget": opens wa.me with pre-filled message */
   function openWhatsApp() {
     if (!quote.client?.phone) return;
-    window.open(`https://wa.me/${waPhone(quote.client.phone)}`, '_blank');
+    const clientName = quote.client.code;
+    const msg = encodeURIComponent(
+      `שלום, אני חוזר בעניין הצעה ${quote.quote_number} עבור ${clientName}. ` +
+      `אשמח לדעת מה המצב מצדכם.`
+    );
+    window.open(`https://wa.me/${waPhone(quote.client.phone)}?text=${msg}`, '_blank');
     setActiveLogger('whatsapp');
   }
 
@@ -284,6 +305,27 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
                     title={tempLabel(t)}
                   >
                     ●
+                  </button>
+                ))}
+              </div>
+
+              {/* ── Strategic rank (1-3) ── */}
+              <div className="flex gap-0.5">
+                {[1, 2, 3].map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => changeStrategicRank(r)}
+                    className={cn(
+                      'rounded px-1.5 py-0.5 text-[10px] font-bold transition-colors',
+                      quote.strategic_rank === r
+                        ? r === 1 ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                          : r === 2 ? 'bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300'
+                            : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800/40 dark:text-zinc-400'
+                        : 'text-(--color-text-secondary)/30 hover:text-(--color-text-secondary)/60',
+                    )}
+                    title={STRATEGIC_RANK_LABELS[r]}
+                  >
+                    {STRATEGIC_RANK_LABELS[r]}
                   </button>
                 ))}
               </div>
@@ -425,8 +467,8 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
                   </button>
                 </>
               ) : (
-                <span className="rounded-lg border border-dashed border-(--color-border) px-3 py-1.5 text-xs text-(--color-text-secondary)/60">
-                  קבצים מקומיים נגישים רק ממחשב המשרד
+                <span className="rounded-lg border border-dashed border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/20 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+                  גישה לקבצים מקומיים מוגבלת לרשת המשרד. יש להשתמש ב-VPN או לעבוד מעמדת המשרד לצפייה ב-PDF
                 </span>
               )
             )}
@@ -442,48 +484,73 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
           />
         )}
 
-        {/* ── Defer panel ── */}
+        {/* ── Conditional Defer panel (requires reason category) ── */}
         {showDeferPanel && (
           <div className="border-t border-(--color-border) bg-(--color-surface-dim) px-6 py-4 space-y-3 animate-fade-in">
-            <p className="text-xs font-bold text-(--color-warning)">דחיית הצעה</p>
-            <textarea
-              value={deferReason}
-              onChange={(e) => setDeferReason(e.target.value)}
-              autoFocus
-              rows={2}
-              placeholder="למה דוחים?"
-              className="w-full rounded-lg border border-(--color-border) bg-(--color-surface) px-3 py-2 text-sm text-(--color-text) outline-none placeholder:text-(--color-text-secondary)/50 focus:border-(--color-warning) resize-none"
-              dir="rtl"
-              onKeyDown={(e) => e.key === 'Enter' && e.ctrlKey && saveDeferral()}
-            />
-            <div className="space-y-1.5">
-              <p className="text-xs font-semibold text-(--color-text-secondary)">תזכורת להתעוררות</p>
-              <input
-                type="date"
-                value={deferWakeUp}
-                onChange={(e) => setDeferWakeUp(e.target.value)}
-                className="rounded-full border border-(--color-border) px-3 py-1 text-xs text-(--color-text-secondary) bg-(--color-surface) outline-none focus:border-(--color-warning)"
-                dir="ltr"
-              />
+            <p className="text-xs font-bold text-(--color-warning)">דחיית הצעה — בחר סיבה</p>
+
+            {/* Step 1: Reason category chips */}
+            <div className="flex flex-wrap gap-1.5">
+              {(Object.entries(DEFER_REASON_LABELS) as [DeferReasonCategory, string][]).map(([cat, label]) => (
+                <button
+                  key={cat}
+                  onClick={() => setDeferCategory(deferCategory === cat ? null : cat)}
+                  className={cn(
+                    'rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors',
+                    deferCategory === cat
+                      ? 'border-(--color-warning) bg-(--color-warning)/10 text-(--color-warning)'
+                      : 'border-(--color-border) text-(--color-text-secondary) hover:border-(--color-warning)/50',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
+
+            {/* Step 2: Optional free-text note (shown after category selected) */}
+            {deferCategory && (
+              <>
+                <textarea
+                  value={deferReason}
+                  onChange={(e) => setDeferReason(e.target.value)}
+                  autoFocus
+                  rows={2}
+                  placeholder="פרטים נוספים (לא חובה)..."
+                  className="w-full rounded-lg border border-(--color-border) bg-(--color-surface) px-3 py-2 text-sm text-(--color-text) outline-none placeholder:text-(--color-text-secondary)/50 focus:border-(--color-warning) resize-none"
+                  dir="rtl"
+                  onKeyDown={(e) => e.key === 'Enter' && e.ctrlKey && saveDeferral()}
+                />
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold text-(--color-text-secondary)">תזכורת להתעוררות</p>
+                  <input
+                    type="date"
+                    value={deferWakeUp}
+                    onChange={(e) => setDeferWakeUp(e.target.value)}
+                    className="rounded-full border border-(--color-border) px-3 py-1 text-xs text-(--color-text-secondary) bg-(--color-surface) outline-none focus:border-(--color-warning)"
+                    dir="ltr"
+                  />
+                </div>
+              </>
+            )}
+
             <div className="flex items-center gap-2 pt-1">
               <button
                 onClick={saveDeferral}
-                disabled={!deferReason.trim() || !deferWakeUp || addInteraction.isPending || updateQuote.isPending}
+                disabled={!deferCategory || !deferWakeUp || addInteraction.isPending || updateQuote.isPending}
                 className="rounded-lg bg-(--color-warning) px-4 py-2 text-sm font-semibold text-white transition-opacity disabled:opacity-30 hover:opacity-90"
               >
                 {(addInteraction.isPending || updateQuote.isPending) ? '...' : 'דחה'}
               </button>
               <button
-                onClick={() => { setShowDeferPanel(false); setDeferReason(''); setDeferWakeUp(''); }}
+                onClick={() => { setShowDeferPanel(false); setDeferCategory(null); setDeferReason(''); setDeferWakeUp(''); }}
                 className="text-sm text-(--color-text-secondary)/60 hover:text-(--color-text-secondary)"
               >
                 ביטול
               </button>
-              {(!deferReason.trim() || !deferWakeUp) ? (
-                <span className="mr-auto text-[10px] font-semibold text-(--color-warning)">
-                  {!deferReason.trim() ? 'חובה סיבה' : 'חובה תאריך התעוררות'}
-                </span>
+              {!deferCategory ? (
+                <span className="mr-auto text-[10px] font-semibold text-(--color-warning)">חובה לבחור סיבה</span>
+              ) : !deferWakeUp ? (
+                <span className="mr-auto text-[10px] font-semibold text-(--color-warning)">חובה תאריך התעוררות</span>
               ) : (
                 <span className="mr-auto text-[10px] text-(--color-text-secondary)/40">Ctrl+Enter לשמירה</span>
               )}
@@ -581,19 +648,34 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
 // ── Single timeline row ────────────────────────────────────────────────────
 
 function SingleInteractionRow({ ix }: { ix: Interaction }) {
+  const isPending = ix.release_status === 'pending';
+
   return (
-    <div className="flex gap-3 border-r-2 border-(--color-border) pr-4 pb-4">
+    <div className={cn(
+      'flex gap-3 border-r-2 pr-4 pb-4',
+      isPending ? 'border-amber-300 dark:border-amber-700 opacity-60' : 'border-(--color-border)',
+    )}>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-semibold text-(--color-accent)">
             {INTERACTION_LABELS[ix.type] ?? ix.type}
           </span>
+          {isPending && (
+            <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 px-1.5 py-0.5 rounded">
+              ישוחרר ביום ראשון
+            </span>
+          )}
           {ix.outcome && (
             <span className={cn(
               'text-xs font-semibold',
               ix.outcome === 'reached' ? 'text-emerald-600 dark:text-emerald-400' : 'text-(--color-text-secondary)/60',
             )}>
               {ix.outcome === 'reached' ? 'שוחחנו' : ix.outcome === 'no_answer' ? 'לא ענה' : 'לא זמין'}
+            </span>
+          )}
+          {ix.defer_category && (
+            <span className="text-[10px] font-semibold text-(--color-warning) bg-amber-50 dark:bg-amber-950/20 px-1.5 py-0.5 rounded">
+              {DEFER_REASON_LABELS[ix.defer_category]}
             </span>
           )}
           <span className="text-xs text-(--color-text-secondary)">{timeAgo(ix.created_at)}</span>

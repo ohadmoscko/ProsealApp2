@@ -1,7 +1,7 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { useHotkey } from '@/lib/hooks';
-import { useIsOffline } from '@/lib/query';
+import { useIsOffline, usePendingSync } from '@/lib/query';
 import Topbar from '@/components/Topbar';
 import CaptureBar from '@/components/CaptureBar';
 
@@ -13,6 +13,7 @@ interface SplitViewProps {
 export default function SplitView({ sidebar, main }: SplitViewProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const offline = useIsOffline();
+  const pendingCount = usePendingSync();
   const captureRef = useRef<HTMLInputElement>(null);
 
   // Keyboard shortcuts
@@ -25,7 +26,12 @@ export default function SplitView({ sidebar, main }: SplitViewProps) {
 
       {offline && (
         <div className="shrink-0 bg-amber-500 px-4 py-1.5 text-center text-xs font-semibold text-white">
-          אין חיבור לאינטרנט — חלק מהפעולות לא יעבדו
+          אין חיבור לאינטרנט — שינויים יישמרו מקומית ויסונכרנו בחזרה לרשת
+          {pendingCount > 0 && (
+            <span className="mr-2 bg-white/20 rounded-full px-2 py-0.5">
+              {pendingCount} ממתינים לסנכרון
+            </span>
+          )}
         </div>
       )}
 

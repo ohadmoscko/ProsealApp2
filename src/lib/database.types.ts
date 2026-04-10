@@ -7,6 +7,8 @@ export type QuoteStatus = 'new' | 'open' | 'waiting' | 'follow_up' | 'won' | 'lo
 export type InteractionType = 'call' | 'whatsapp' | 'email' | 'note' | 'system';
 export type CaptureStatus = 'pending' | 'processed' | 'in_report' | 'dismissed';
 export type InteractionOutcome = 'reached' | 'no_answer' | 'unavailable';
+export type DeferReasonCategory = 'client_abroad' | 'awaiting_technical' | 'price_objection' | 'busy_period' | 'other';
+export type ReleaseStatus = 'immediate' | 'pending' | 'released';
 
 export interface Profile {
   id: string;
@@ -91,7 +93,10 @@ export interface Quote {
   follow_up_date: string | null;
   follow_up_rule: string | null;
   loss_reason: string | null;
+  strategic_rank: number | null; // 1=critical, 2=important, 3=routine
   sales_ammo: string[];
+  ai_summary: string | null;
+  ai_summary_at: string | null;
   opened_at: string;
   last_contact_at: string | null;
   days_since_contact: number | null;
@@ -108,6 +113,9 @@ export interface Interaction {
   outcome: InteractionOutcome | null;
   ice_breaker_tag: string | null;
   defer_reason: string | null;
+  defer_category: DeferReasonCategory | null;
+  release_status: ReleaseStatus;
+  release_at: string | null;
   created_by: string | null;
   created_at: string;
 }
@@ -127,7 +135,7 @@ export interface Capture {
 // Helper: Pick required fields for Insert, rest optional (mirrors Supabase codegen)
 type InsertRow<T, RequiredKeys extends keyof T> = Pick<T, RequiredKeys> & Partial<Omit<T, RequiredKeys>>;
 
-// Supabase client generic — minimal for now
+// Supabase client generic — matches @supabase/supabase-js v2.100+
 export interface Database {
   public: {
     Tables: {
@@ -135,53 +143,68 @@ export interface Database {
         Row: Profile;
         Insert: InsertRow<Profile, 'id' | 'email' | 'display_name' | 'role'>;
         Update: Partial<Profile>;
+        Relationships: [];
       };
       categories: {
         Row: Category;
         Insert: InsertRow<Category, 'key' | 'label' | 'position'>;
         Update: Partial<Category>;
+        Relationships: [];
       };
       weeks: {
         Row: Week;
         Insert: InsertRow<Week, 'start_date' | 'end_date' | 'status' | 'ceo_goals'>;
         Update: Partial<Week>;
+        Relationships: [];
       };
       items: {
         Row: Item;
         Insert: InsertRow<Item, 'week_id' | 'category_id' | 'text'>;
         Update: Partial<Item>;
+        Relationships: [];
       };
       comments: {
         Row: Comment;
         Insert: InsertRow<Comment, 'week_id' | 'user_id' | 'content'>;
         Update: Partial<Comment>;
+        Relationships: [];
       };
       clients: {
         Row: Client;
         Insert: InsertRow<Client, 'code'>;
         Update: Partial<Client>;
+        Relationships: [];
       };
       quotes: {
         Row: Quote;
         Insert: InsertRow<Quote, 'quote_number' | 'client_id' | 'status' | 'opened_at'>;
         Update: Partial<Quote>;
+        Relationships: [];
       };
       interactions: {
         Row: Interaction;
         Insert: InsertRow<Interaction, 'quote_id' | 'type' | 'content'>;
         Update: Partial<Interaction>;
+        Relationships: [];
       };
       captures: {
         Row: Capture;
         Insert: InsertRow<Capture, 'raw_text'>;
         Update: Partial<Capture>;
+        Relationships: [];
       };
     };
-    Views: Record<string, never>;
+    Views: {
+      quotes_with_triage: {
+        Row: Quote & { effective_temperature: number; auto_temperature: number; staleness: string };
+        Relationships: [];
+      };
+    };
     Functions: {
       find_quote_by_unified_id: {
         Args: { p_erp_number: string; p_initials: string; p_quote_number: string };
         Returns: string | null;
+        SetofOptions: { isOneToOne: true }; // Required by GenericFunction
       };
     };
     Enums: {
@@ -191,6 +214,8 @@ export interface Database {
       quote_status: QuoteStatus;
       interaction_type: InteractionType;
       capture_status: CaptureStatus;
+      defer_reason_category: DeferReasonCategory;
+      release_status: ReleaseStatus;
     };
   };
 }

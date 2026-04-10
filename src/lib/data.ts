@@ -6,7 +6,39 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { useAuth } from './auth';
-import type { Quote, Client, Interaction, Capture, InteractionType, InteractionOutcome } from './database.types';
+import type { Quote, Client, Interaction, Capture, InteractionType, InteractionOutcome, DeferReasonCategory, ReleaseStatus } from './database.types';
+
+// ============================================================
+//  Queued Release: weekend notes → released Sunday 08:00
+// ============================================================
+
+/** Check if current time is during Israeli weekend (Friday 14:00 – Sunday 08:00) */
+function isWeekendWindow(): boolean {
+  const now = new Date();
+  // Israel timezone offset — approximate with Intl
+  const ilTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }));
+  const day = ilTime.getDay(); // 0=Sun, 5=Fri, 6=Sat
+  const hour = ilTime.getHours();
+
+  if (day === 6) return true;                      // Saturday — always weekend
+  if (day === 5 && hour >= 14) return true;         // Friday after 14:00
+  if (day === 0 && hour < 8) return true;           // Sunday before 08:00
+  return false;
+}
+
+/** Compute next Sunday 08:00 Israel time as ISO string */
+function nextSundayRelease(): string {
+  const now = new Date();
+  const ilNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }));
+  const day = ilNow.getDay();
+  let daysUntilSunday = (7 - day) % 7;
+  if (day === 0 && ilNow.getHours() < 8) daysUntilSunday = 0;
+  if (daysUntilSunday === 0 && ilNow.getHours() >= 8) daysUntilSunday = 7;
+  const target = new Date(ilNow);
+  target.setDate(target.getDate() + daysUntilSunday);
+  target.setHours(8, 0, 0, 0);
+  return target.toISOString();
+}
 
 // ============================================================
 //  Quotes
@@ -61,14 +93,21 @@ export function useAddInteraction() {
       content,
       outcome,
       followUpDate,
+      deferCategory,
     }: {
       quoteId: string;
       type: InteractionType;
       content: string;
       outcome?: InteractionOutcome;
       followUpDate?: string | null; // ISO date YYYY-MM-DD, updates quote.follow_up_date
+      deferCategory?: DeferReasonCategory;
     }) => {
-      // 1. Insert interaction
+      // 1. Queued release: notes written during weekend are held until Sunday 08:00
+      const weekend = isWeekendWindow();
+      const releaseStatus: ReleaseStatus = (weekend && type === 'note') ? 'pending' : 'immediate';
+      const releaseAt = releaseStatus === 'pending' ? nextSundayRelease() : null;
+
+      // 2. Insert interaction
       const { data, error } = await supabase
         .from('interactions')
         .insert({
@@ -76,6 +115,9 @@ export function useAddInteraction() {
           type,
           content,
           outcome: outcome ?? null,
+          defer_category: deferCategory ?? null,
+          release_status: releaseStatus,
+          release_at: releaseAt,
           created_by: user?.id ?? null,
         })
         .select()
@@ -83,7 +125,7 @@ export function useAddInteraction() {
 
       if (error) throw new Error(error.message);
 
-      // 2. Optionally update follow-up date on the quote
+      // 3. Optionally update follow-up date on the quote
       if (followUpDate !== undefined) {
         const { error: qErr } = await supabase
           .from('quotes')
@@ -97,6 +139,35 @@ export function useAddInteraction() {
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ['interactions', vars.quoteId] });
       queryClient.invalidateQueries({ queryKey: ['quotes'] });
+    },
+  });
+}
+
+/**
+ * Release pending weekend notes that are past their release_at time.
+ * Called once on app load (Sunday morning check).
+ */
+export function useReleasePendingNotes() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      const now = new Date().toISOString();
+      const { data, error } = await supabase
+        .from('interactions')
+        .update({ release_status: 'released' })
+        .eq('release_status', 'pending')
+        .lte('release_at', now)
+        .select('id');
+
+      if (error) throw new Error(error.message);
+      return data?.length ?? 0;
+    },
+    onSuccess: (count) => {
+      if (count > 0) {
+        queryClient.invalidateQueries({ queryKey: ['interactions'] });
+        queryClient.invalidateQueries({ queryKey: ['quotes'] });
+      }
     },
   });
 }
@@ -250,6 +321,25 @@ export function useCreateQuote() {
 
       if (error) throw new Error(error.message);
       return { id: (data as Quote).id, merged: false };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['quotes'] });
+    },
+  });
+}
+
+// ============================================================
+//  AI Intern: Refresh quote summary via Edge Function
+// ============================================================
+
+export function useRefreshSummary() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ quoteId, batch }: { quoteId?: string; batch?: boolean }) => {
+      const body = batch ? { batch: true } : { quote_id: quoteId };
+      const { error } = await supabase.functions.invoke('generate-summary', { body });
+      if (error) throw new Error(error.message);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['quotes'] });

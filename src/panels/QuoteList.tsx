@@ -1,5 +1,5 @@
-import { cn, tempColor } from '@/lib/utils';
-import { STATUS_LABELS } from '@/lib/constants';
+import { cn, tempColor, effectiveTemperature } from '@/lib/utils';
+import { STATUS_LABELS, STRATEGIC_RANK_LABELS } from '@/lib/constants';
 import type { Quote, Client } from '@/lib/database.types';
 
 /** Drawer = group of quotes by priority bucket */
@@ -16,49 +16,66 @@ interface QuoteListProps {
   onModeChange?: (mode: 'quotes' | 'report') => void;
   mode?: 'quotes' | 'report';
   isLoading?: boolean;
+  focusMode?: boolean;
 }
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
-function bucketQuotes(quotes: (Quote & { client?: Client })[]): Drawer[] {
-  const urgent:    typeof quotes = [];
-  const forgotten: typeof quotes = [];
-  const routine:   typeof quotes = [];
-  const waiting:   typeof quotes = [];
+/**
+ * 3-drawer bucketing:
+ *  1. "לטפל עכשיו" — high temp, overdue follow-ups, forgotten quotes
+ *  2. "מעקב שגרתי" — normal active quotes
+ *  3. "הכדור אצל הלקוח" — waiting on client response
+ */
+function bucketQuotes(quotes: (Quote & { client?: Client })[], focusMode: boolean): Drawer[] {
+  const actNow:  typeof quotes = [];
+  const routine: typeof quotes = [];
+  const waiting: typeof quotes = [];
 
   for (const q of quotes) {
     if (['won', 'lost', 'dormant'].includes(q.status)) continue;
 
-    // "Waiting on them" — ball is in the client's court
+    // Drawer 3: ball is in the client's court
     if (q.status === 'waiting') { waiting.push(q); continue; }
 
-    // Overdue follow-up or ≥4 days without contact → forgotten
+    // Drawer 1 criteria: high temp, follow-up status, overdue, or forgotten (stale)
     const overdueFollowUp = q.follow_up_date && q.follow_up_date < TODAY;
-    const staleContact    = (q.days_since_contact ?? 0) >= 4;
-    const isForgotten     = (overdueFollowUp || staleContact) && q.temperature < 4 && q.status !== 'follow_up';
+    const staleContact = (q.days_since_contact ?? 0) >= 4;
+    const eff = effectiveTemperature(q.temperature, q.days_since_contact);
+    const isHot = q.temperature >= 4 || eff >= 4;
+    const isUrgent = isHot || q.status === 'follow_up' || overdueFollowUp || staleContact;
 
-    if (q.temperature >= 4 || q.status === 'follow_up') {
-      urgent.push(q);
-    } else if (isForgotten) {
-      forgotten.push(q);
+    if (isUrgent) {
+      actNow.push(q);
     } else {
       routine.push(q);
     }
   }
 
-  // Sort forgotten by staleness (most neglected first)
-  forgotten.sort((a, b) => (b.days_since_contact ?? 0) - (a.days_since_contact ?? 0));
+  // Sort "act now" by effective temperature desc, then staleness desc
+  actNow.sort((a, b) => {
+    const aEff = effectiveTemperature(a.temperature, a.days_since_contact);
+    const bEff = effectiveTemperature(b.temperature, b.days_since_contact);
+    if (bEff !== aEff) return bEff - aEff;
+    return (b.days_since_contact ?? 0) - (a.days_since_contact ?? 0);
+  });
+
+  // Focus mode: only top 3 in "act now", hide other drawers
+  if (focusMode) {
+    return [
+      { key: 'act_now', label: 'לטפל עכשיו', quotes: actNow.slice(0, 3) },
+    ];
+  }
 
   return [
-    { key: 'urgent',    label: 'לטפל עכשיו',   quotes: urgent    },
-    { key: 'forgotten', label: 'נשכחו',         quotes: forgotten },
-    { key: 'routine',   label: 'מעקב שגרתי',   quotes: routine   },
-    { key: 'waiting',   label: 'הכדור אצלם',   quotes: waiting   },
+    { key: 'act_now', label: 'לטפל עכשיו',       quotes: actNow  },
+    { key: 'routine', label: 'מעקב שגרתי',       quotes: routine },
+    { key: 'waiting', label: 'הכדור אצל הלקוח',  quotes: waiting },
   ];
 }
 
-export default function QuoteList({ quotes, selectedId, onSelect, onModeChange, mode = 'quotes', isLoading = false }: QuoteListProps) {
-  const drawers = bucketQuotes(quotes);
+export default function QuoteList({ quotes, selectedId, onSelect, onModeChange, mode = 'quotes', isLoading = false, focusMode = false }: QuoteListProps) {
+  const drawers = bucketQuotes(quotes, focusMode);
 
   return (
     <div className="flex h-full flex-col">
@@ -92,7 +109,7 @@ export default function QuoteList({ quotes, selectedId, onSelect, onModeChange, 
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
           <div className="space-y-1 p-3">
-            {[...Array(4)].map((_, i) => (
+            {[...Array(3)].map((_, i) => (
               <div key={i} className="h-14 rounded-lg bg-(--color-border)/30 animate-pulse" />
             ))}
           </div>
@@ -100,9 +117,11 @@ export default function QuoteList({ quotes, selectedId, onSelect, onModeChange, 
           <div key={drawer.key}>
             <div className={cn(
               'sticky top-0 px-4 py-2 text-xs font-bold uppercase tracking-wide border-b border-(--color-border)/50',
-              drawer.key === 'forgotten'
-                ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400'
-                : 'bg-(--color-surface-dim) text-(--color-text-secondary)',
+              drawer.key === 'act_now'
+                ? 'bg-red-50 text-red-700 dark:bg-red-950/20 dark:text-red-400'
+                : drawer.key === 'waiting'
+                  ? 'bg-sky-50 text-sky-700 dark:bg-sky-950/20 dark:text-sky-400'
+                  : 'bg-(--color-surface-dim) text-(--color-text-secondary)',
             )}>
               {drawer.label}
               <span className="mr-1 opacity-60">({drawer.quotes.length})</span>
@@ -122,7 +141,19 @@ export default function QuoteList({ quotes, selectedId, onSelect, onModeChange, 
                   )}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold text-(--color-text)">{q.quote_number}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-(--color-text)">{q.quote_number}</span>
+                      {q.strategic_rank && (
+                        <span className={cn(
+                          'text-[10px] font-bold px-1.5 py-0.5 rounded',
+                          q.strategic_rank === 1 && 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300',
+                          q.strategic_rank === 2 && 'bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300',
+                          q.strategic_rank === 3 && 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800/40 dark:text-zinc-400',
+                        )}>
+                          {STRATEGIC_RANK_LABELS[q.strategic_rank]}
+                        </span>
+                      )}
+                    </div>
                     <span className={cn('text-xs font-bold', tempColor(q.temperature))}>
                       {'●'.repeat(q.temperature)}
                     </span>
@@ -131,6 +162,11 @@ export default function QuoteList({ quotes, selectedId, onSelect, onModeChange, 
                     {q.client?.code ?? '—'}
                     <span className="mx-1.5 text-(--color-border)">|</span>
                     <span>{STATUS_LABELS[q.status]}</span>
+                    {q.days_since_contact != null && q.days_since_contact >= 4 && (
+                      <span className="mr-1.5 text-amber-600 dark:text-amber-400 font-semibold">
+                        {q.days_since_contact}d
+                      </span>
+                    )}
                   </div>
                 </button>
               ))
