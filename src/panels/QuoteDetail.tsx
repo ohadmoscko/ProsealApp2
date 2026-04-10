@@ -230,6 +230,26 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
     setActiveLogger('whatsapp');
   }
 
+  /**
+   * WhatsApp with sales ammo: builds a richer message from the quote's
+   * strength points. One click -> wa.me opens with a persuasive template.
+   * Satisfies the 3-click rule: click button -> WhatsApp opens -> send.
+   */
+  function openWhatsAppWithAmmo() {
+    if (!quote.client?.phone) return;
+    const clientName = quote.client.code;
+    const ammoLines = quote.sales_ammo.length > 0
+      ? '\n\nנקודות שכדאי לדעת:\n' + quote.sales_ammo.map((a) => `- ${a}`).join('\n')
+      : '';
+    const msg = encodeURIComponent(
+      `שלום, בהמשך להצעה ${quote.quote_number} עבור ${clientName} —` +
+      ammoLines +
+      `\n\nאשמח לשמוע מכם.`
+    );
+    window.open(`https://wa.me/${waPhone(quote.client.phone)}?text=${msg}`, '_blank');
+    setActiveLogger('whatsapp');
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────
 
   return (
@@ -436,12 +456,23 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
               דחה
             </button>
             {quote.client?.phone && (
-              <button
-                onClick={openWhatsApp}
-                className="rounded-lg border border-emerald-300 dark:border-emerald-700 px-3 py-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 transition-colors"
-              >
-                שלח WA
-              </button>
+              <>
+                <button
+                  onClick={openWhatsApp}
+                  className="rounded-lg border border-emerald-300 dark:border-emerald-700 px-3 py-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 transition-colors"
+                >
+                  שלח WA
+                </button>
+                {quote.sales_ammo.length > 0 && (
+                  <button
+                    onClick={openWhatsAppWithAmmo}
+                    className="rounded-lg border border-emerald-300 dark:border-emerald-700 px-3 py-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 transition-colors"
+                    title="שלח הודעה עם נקודות חוזק"
+                  >
+                    WA + נק' חוזק
+                  </button>
+                )}
+              </>
             )}
             {quote.local_file_path && (
               isTauri ? (
