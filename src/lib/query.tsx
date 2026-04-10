@@ -23,8 +23,8 @@ export function QueryProvider({ children }: { children: ReactNode }) {
       const pending = pendingMutationCount();
       if (pending > 0) {
         console.info(`[offline-sync] Back online — flushing ${pending} queued mutations`);
-        const { flushed, failed } = await flushOfflineQueue();
-        console.info(`[offline-sync] Flushed: ${flushed}, Failed: ${failed}`);
+        const { flushed, failed, skipped } = await flushOfflineQueue();
+        console.info(`[offline-sync] Flushed: ${flushed}, Failed: ${failed}, Skipped: ${skipped}`);
         // Invalidate all queries to pick up synced data
         if (flushed > 0) {
           client.invalidateQueries();
