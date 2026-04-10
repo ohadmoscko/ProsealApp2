@@ -385,6 +385,53 @@ export function useLogTelemetry() {
 }
 
 // ============================================================
+//  Weekly CEO Report
+// ============================================================
+
+export interface WeeklyReport {
+  executive_summary: string;
+  highlights: string[];
+  risks: string[];
+  action_items: string[];
+  ceo_messages: string[];
+  quote_summary: {
+    total_active: number;
+    new_this_week: number;
+    closed_won: number;
+    closed_lost: number;
+    overdue_followups: number;
+    hottest: string;
+  };
+  mood: 'positive' | 'neutral' | 'warning' | 'critical';
+  week_start: string;
+  week_end: string;
+  generated_at: string;
+  raw_stats: {
+    total_active: number;
+    new_this_week: number;
+    closed_won: number;
+    closed_lost: number;
+    interactions_count: number;
+    captures_count: number;
+    ceo_messages_count: number;
+  };
+}
+
+/** Generate the weekly CEO report via Edge Function */
+export function useGenerateWeeklyReport() {
+  return useMutation({
+    mutationFn: async (weekStart?: string): Promise<WeeklyReport> => {
+      const body = weekStart ? { week_start: weekStart } : {};
+      const { data, error } = await supabase.functions.invoke('generate-weekly-report', { body });
+
+      if (error) throw new Error(error.message);
+      if (!data?.ok) throw new Error(data?.error ?? 'Unknown error generating report');
+      return data.report as WeeklyReport;
+    },
+  });
+}
+
+// ============================================================
 //  Quote mutations
 // ============================================================
 

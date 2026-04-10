@@ -4,13 +4,14 @@ import SplitView from '@/layouts/SplitView';
 import QuoteList from '@/panels/QuoteList';
 import QuoteDetail from '@/panels/QuoteDetail';
 import CaptureChat from '@/panels/CaptureChat';
+import WeeklyReport from '@/panels/WeeklyReport';
 import CopilotBriefing from '@/components/CopilotBriefing';
 import AiInternAccordion from '@/components/AiInternAccordion';
 import { useQuotes, useInteractions, useReleasePendingNotes } from '@/lib/data';
 
 export default function Dashboard() {
   const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
-  const [mode, setMode] = useState<'quotes' | 'report'>('quotes');
+  const [mode, setMode] = useState<'quotes' | 'captures' | 'report'>('quotes');
   const [focusMode, setFocusMode] = useState(false);
 
   const { data: quotes = [], isLoading: quotesLoading } = useQuotes();
@@ -90,6 +91,8 @@ export default function Dashboard() {
             </p>
           </div>
         )
+      ) : mode === 'report' ? (
+        <WeeklyReport />
       ) : (
         <CaptureChat />
       )}

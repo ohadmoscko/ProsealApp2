@@ -13,8 +13,8 @@ interface QuoteListProps {
   quotes: (Quote & { client?: Client })[];
   selectedId: string | null;
   onSelect: (id: string) => void;
-  onModeChange?: (mode: 'quotes' | 'report') => void;
-  mode?: 'quotes' | 'report';
+  onModeChange?: (mode: 'quotes' | 'captures' | 'report') => void;
+  mode?: 'quotes' | 'captures' | 'report';
   isLoading?: boolean;
   focusMode?: boolean;
 }
@@ -91,6 +91,17 @@ export default function QuoteList({ quotes, selectedId, onSelect, onModeChange, 
           )}
         >
           הצעות מחיר
+        </button>
+        <button
+          onClick={() => onModeChange?.('captures')}
+          className={cn(
+            'flex-1 py-2.5 text-xs font-semibold transition-colors',
+            mode === 'captures'
+              ? 'text-(--color-accent) border-b-2 border-(--color-accent)'
+              : 'text-(--color-text-secondary) hover:text-(--color-text)',
+          )}
+        >
+          אירועים
         </button>
         <button
           onClick={() => onModeChange?.('report')}
