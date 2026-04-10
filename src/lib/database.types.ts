@@ -77,6 +77,7 @@ export interface Client {
   is_vip: boolean;
   vip_set_at: string | null;
   vip_set_by: string | null;
+  deleted_at: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -100,6 +101,7 @@ export interface Quote {
   opened_at: string;
   last_contact_at: string | null;
   days_since_contact: number | null;
+  deleted_at: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -116,6 +118,7 @@ export interface Interaction {
   defer_category: DeferReasonCategory | null;
   release_status: ReleaseStatus;
   release_at: string | null;
+  deleted_at: string | null;
   created_by: string | null;
   created_at: string;
 }
