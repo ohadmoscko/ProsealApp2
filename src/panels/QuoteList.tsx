@@ -16,7 +16,6 @@ interface QuoteListProps {
   onModeChange?: (mode: 'quotes' | 'captures' | 'report') => void;
   mode?: 'quotes' | 'captures' | 'report';
   isLoading?: boolean;
-  focusMode?: boolean;
 }
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -74,13 +73,13 @@ function bucketQuotes(quotes: (Quote & { client?: Client })[], focusMode: boolea
   ];
 }
 
-export default function QuoteList({ quotes, selectedId, onSelect, onModeChange, mode = 'quotes', isLoading = false, focusMode = false }: QuoteListProps) {
-  const drawers = bucketQuotes(quotes, focusMode);
+export default function QuoteList({ quotes, selectedId, onSelect, onModeChange, mode = 'quotes', isLoading = false }: QuoteListProps) {
+  const drawers = bucketQuotes(quotes);
 
   return (
     <div className="flex h-full flex-col">
-      {/* Mode tabs */}
-      <div className="flex border-b border-(--color-border)">
+      {/* Mode tabs + Create button */}
+      <div className="flex items-center border-b border-(--color-border)">
         <button
           onClick={() => onModeChange?.('quotes')}
           className={cn(
@@ -114,6 +113,16 @@ export default function QuoteList({ quotes, selectedId, onSelect, onModeChange, 
         >
           דוח שבועי
         </button>
+        {/* Create new quote — always visible */}
+        {onCreateNew && (
+          <button
+            onClick={onCreateNew}
+            className="shrink-0 mx-1 rounded-md px-2 py-1.5 text-sm font-bold text-(--color-accent) hover:bg-(--color-accent)/10 transition-colors"
+            title="צור הצעה חדשה"
+          >
+            +
+          </button>
+        )}
       </div>
 
       {/* Drawers / Content Area */}
@@ -124,77 +133,47 @@ export default function QuoteList({ quotes, selectedId, onSelect, onModeChange, 
               <div key={i} className="h-14 rounded-lg bg-(--color-border)/30 animate-pulse" />
             ))}
           </div>
-        ) : mode === 'quotes' ? (
-          drawers.map((drawer) => (
-            <div key={drawer.key}>
-              <div className={cn(
-                'sticky top-0 px-4 py-2 text-xs font-bold uppercase tracking-wide border-b border-(--color-border)/50',
-                drawer.key === 'act_now'
-                  ? 'bg-red-950/20 text-red-400 light:bg-red-50 light:text-red-700'
-                  : drawer.key === 'waiting'
-                    ? 'bg-sky-950/20 text-sky-400 light:bg-sky-50 light:text-sky-700'
-                    : 'bg-(--color-surface-dim) text-(--color-text-secondary)',
-              )}>
-                {drawer.label}
-                <span className="mr-1 opacity-60">({drawer.quotes.length})</span>
-              </div>
-              {drawer.quotes.length === 0 ? (
-                <div className="px-4 py-3 text-xs text-(--color-text-secondary)/50">אין הצעות</div>
-              ) : (
-                drawer.quotes.map((q) => (
-                  <button
-                    key={q.id}
-                    onClick={() => onSelect(q.id)}
-                    className={cn(
-                      'w-full px-4 py-3 text-right transition-colors border-b border-(--color-border)/30',
-                      selectedId === q.id
-                        ? 'bg-(--color-accent)/8'
-                        : 'hover:bg-(--color-surface-dim)/60',
-                    )}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-(--color-text)">{q.quote_number}</span>
-                        {q.strategic_rank && (
-                          <span className={cn(
-                            'text-[10px] font-bold px-1.5 py-0.5 rounded',
-                            q.strategic_rank === 1 && 'bg-red-950/40 text-red-300 light:bg-red-100 light:text-red-700',
-                            q.strategic_rank === 2 && 'bg-orange-950/40 text-orange-300 light:bg-orange-100 light:text-orange-700',
-                            q.strategic_rank === 3 && 'bg-zinc-800/40 text-zinc-400 light:bg-zinc-100 light:text-zinc-600',
-                          )}>
-                            {STRATEGIC_RANK_LABELS[q.strategic_rank]}
-                          </span>
-                        )}
-                      </div>
-                      <span className={cn('text-xs font-bold', tempColor(q.temperature))}>
-                        {'●'.repeat(q.temperature)}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 text-xs text-(--color-text-secondary)">
-                      {q.client?.code ?? '—'}
-                      <span className="mx-1.5 text-(--color-border)">|</span>
-                      <span>{STATUS_LABELS[q.status]}</span>
-                      {q.days_since_contact != null && q.days_since_contact >= 4 && (
-                        <span className="mr-1.5 text-amber-400 light:text-amber-600 font-semibold">
-                          {q.days_since_contact}d
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                ))
-              )}
+        ) : drawers.map((drawer) => (
+          <div key={drawer.key}>
+            <div className={cn(
+              'sticky top-0 px-4 py-2 text-xs font-bold uppercase tracking-wide border-b border-(--color-border)/50',
+              drawer.key === 'forgotten'
+                ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400'
+                : 'bg-(--color-surface-dim) text-(--color-text-secondary)',
+            )}>
+              {drawer.label}
+              <span className="mr-1 opacity-60">({drawer.quotes.length})</span>
             </div>
-          ))
-        ) : mode === 'captures' ? (
-          <div className="p-6 text-center text-(--color-text-secondary) text-sm">
-            <p className="font-bold mb-2">יומן אירועים מתגלגל</p>
-            כאן יוצגו האירועים והתיעוד השוטף (Rolling Log).
+            {drawer.quotes.length === 0 ? (
+              <div className="px-4 py-3 text-xs text-(--color-text-secondary)/50">אין הצעות</div>
+            ) : (
+              drawer.quotes.map((q) => (
+                <button
+                  key={q.id}
+                  onClick={() => onSelect(q.id)}
+                  className={cn(
+                    'w-full px-4 py-3 text-right transition-colors border-b border-(--color-border)/30',
+                    selectedId === q.id
+                      ? 'bg-(--color-accent)/8'
+                      : 'hover:bg-(--color-surface-dim)/60',
+                  )}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-(--color-text)">{q.quote_number}</span>
+                    <span className={cn('text-xs font-bold', tempColor(q.temperature))}>
+                      {'●'.repeat(q.temperature)}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 text-xs text-(--color-text-secondary)">
+                    {q.client?.code ?? '—'}
+                    <span className="mx-1.5 text-(--color-border)">|</span>
+                    <span>{STATUS_LABELS[q.status]}</span>
+                  </div>
+                </button>
+              ))
+            )}
           </div>
-        ) : (
-          <div className="p-6 text-center text-(--color-text-secondary) text-sm">
-            מעבר לדוח המנכ"ל...
-          </div>
-        )}
+        ))}
       </div>
     </div>
   );

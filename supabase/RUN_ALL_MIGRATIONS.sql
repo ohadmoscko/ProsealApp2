@@ -1,5 +1,5 @@
 -- ============================================================
---  PROSEAL BRAIN — כל המיגרציות (010-014) בסקריפט אחד
+--  PROSEAL BRAIN — כל המיגרציות (010-020) בסקריפט אחד
 --  העתק והדבק ב-Supabase SQL Editor → Run
 -- ============================================================
 
@@ -222,3 +222,51 @@ INSERT INTO interactions (quote_id, type, content, outcome) VALUES
   ((SELECT id FROM quotes WHERE quote_number = 'Q-3301'), 'whatsapp', 'שלחתי הצעה מעודכנת', NULL),
   ((SELECT id FROM quotes WHERE quote_number = 'Q-1120A'), 'call', 'ביקש לחכות עד סוף השבוע, ממתין לאישור תקציב', 'reached'),
   ((SELECT id FROM quotes WHERE quote_number = 'Q-1120B'), 'email', 'נשלח מפרט טכני', NULL);
+
+-- ============================================================
+--  020: Fix last_contact_at trigger
+--  הריצו בלוק זה בנפרד ב-SQL Editor אם המיגרציות הקודמות כבר רצו
+-- ============================================================
+
+DROP TRIGGER IF EXISTS on_interaction_insert ON interactions;
+
+CREATE OR REPLACE FUNCTION update_quote_last_contact()
+RETURNS TRIGGER AS $$
+DECLARE
+  target_quote_id UUID;
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    target_quote_id := OLD.quote_id;
+  ELSIF TG_OP = 'UPDATE' AND OLD.quote_id IS DISTINCT FROM NEW.quote_id THEN
+    UPDATE quotes SET last_contact_at = (
+      SELECT MAX(created_at)
+      FROM interactions
+      WHERE quote_id = OLD.quote_id
+        AND deleted_at IS NULL
+        AND type != 'system'
+    )
+    WHERE id = OLD.quote_id;
+    target_quote_id := NEW.quote_id;
+  ELSE
+    target_quote_id := NEW.quote_id;
+  END IF;
+
+  UPDATE quotes SET last_contact_at = (
+    SELECT MAX(created_at)
+    FROM interactions
+    WHERE quote_id = target_quote_id
+      AND deleted_at IS NULL
+      AND type != 'system'
+  )
+  WHERE id = target_quote_id;
+
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER on_interaction_change
+  AFTER INSERT OR UPDATE OR DELETE ON interactions
+  FOR EACH ROW EXECUTE FUNCTION update_quote_last_contact();

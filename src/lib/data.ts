@@ -6,52 +6,26 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { useAuth } from './auth';
-import type { Quote, Client, Interaction, Capture, InteractionType, InteractionOutcome, DeferReasonCategory, ReleaseStatus, TelemetryAction } from './database.types';
-
-// ============================================================
-//  Queued Release: weekend notes → released Sunday 08:00
-// ============================================================
-
-/** Check if current time is during Israeli weekend (Friday 14:00 – Sunday 08:00) */
-function isWeekendWindow(): boolean {
-  const now = new Date();
-  // Israel timezone offset — approximate with Intl
-  const ilTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }));
-  const day = ilTime.getDay(); // 0=Sun, 5=Fri, 6=Sat
-  const hour = ilTime.getHours();
-
-  if (day === 6) return true;                      // Saturday — always weekend
-  if (day === 5 && hour >= 14) return true;         // Friday after 14:00
-  if (day === 0 && hour < 8) return true;           // Sunday before 08:00
-  return false;
-}
-
-/** Compute next Sunday 08:00 Israel time as ISO string */
-function nextSundayRelease(): string {
-  const now = new Date();
-  const ilNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }));
-  const day = ilNow.getDay();
-  let daysUntilSunday = (7 - day) % 7;
-  if (day === 0 && ilNow.getHours() < 8) daysUntilSunday = 0;
-  if (daysUntilSunday === 0 && ilNow.getHours() >= 8) daysUntilSunday = 7;
-  const target = new Date(ilNow);
-  target.setDate(target.getDate() + daysUntilSunday);
-  target.setHours(8, 0, 0, 0);
-  return target.toISOString();
-}
+import type { Quote, Client, Interaction, Capture, InteractionType, InteractionOutcome } from './database.types';
 
 // ============================================================
 //  Quotes
 // ============================================================
 
-export function useQuotes() {
+export function useQuotes(includeArchived = false) {
   return useQuery({
-    queryKey: ['quotes'],
+    queryKey: ['quotes', { includeArchived }],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from('quotes')
         .select('*, client:clients(*)')
-        .not('status', 'in', '("won","lost","dormant")')
+        .is('deleted_at', null);
+
+      if (!includeArchived) {
+        query = query.not('status', 'in', '("won","lost","dormant")');
+      }
+
+      const { data, error } = await query
         .order('temperature', { ascending: false })
         .order('follow_up_date', { ascending: true, nullsFirst: false });
 

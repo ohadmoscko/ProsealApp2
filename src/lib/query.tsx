@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
-import { flushOfflineQueue, pendingMutationCount } from './offline-sync';
 
 export function QueryProvider({ children }: { children: ReactNode }) {
   const [client] = useState(() => new QueryClient({
@@ -11,34 +10,8 @@ export function QueryProvider({ children }: { children: ReactNode }) {
         refetchOnWindowFocus: false,
         retry: 1,
       },
-      mutations: {
-        retry: 1, // Retry failed mutations once
-      },
     },
   }));
-
-  // Flush offline queue when coming back online
-  useEffect(() => {
-    const handleOnline = async () => {
-      const pending = pendingMutationCount();
-      if (pending > 0) {
-        console.info(`[offline-sync] Back online — flushing ${pending} queued mutations`);
-        const { flushed, failed, skipped, orphanedRows } = await flushOfflineQueue();
-        console.info(`[offline-sync] Flushed: ${flushed}, Failed: ${failed}, Skipped: ${skipped}, Orphaned: ${orphanedRows.length}`);
-        // Invalidate all queries to pick up synced data (including orphan removals)
-        if (flushed > 0 || orphanedRows.length > 0) {
-          client.invalidateQueries();
-        }
-        if (orphanedRows.length > 0) {
-          console.warn('[offline-sync] Orphaned rows (deleted on server):', orphanedRows);
-        }
-      }
-    };
-    window.addEventListener('online', handleOnline);
-    // Also flush on mount (app may have been opened while offline then regained connection)
-    if (navigator.onLine) handleOnline();
-    return () => window.removeEventListener('online', handleOnline);
-  }, [client]);
 
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }

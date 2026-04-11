@@ -46,8 +46,10 @@ export default function SplitView({ sidebar, main }: SplitViewProps) {
           <div className="h-full overflow-y-auto">{sidebar}</div>
         </aside>
 
-        {/* Left panel (main content) — takes remaining space */}
-        <main className="flex-1 overflow-y-auto">
+        {/* Left panel (main content) — takes remaining space.
+            min-h-0 resets flex default min-height so children can scroll
+            independently via their own overflow-y-auto. */}
+        <main className="flex-1 min-h-0">
           {main}
         </main>
       </div>

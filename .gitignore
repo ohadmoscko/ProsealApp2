@@ -34,3 +34,5 @@ Thumbs.db
 
 # Tauri build artifacts
 src-tauri/target
+
+supabase/.temp/

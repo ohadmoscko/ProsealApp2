@@ -3,6 +3,7 @@ import { cn, fmtDate, timeAgo, tempColor, tempLabel } from '@/lib/utils';
 import { STATUS_LABELS, STATUS_COLORS, INTERACTION_LABELS, STRATEGIC_RANK_LABELS, DEFER_REASON_LABELS } from '@/lib/constants';
 import { isTauri, copyToClipboard, openFileLocation } from '@/lib/tauri';
 import { useToast } from '@/lib/toast';
+import { detectSensitiveContent } from '@/lib/sanitization';
 import { useUpdateClient, useUpdateQuote, useAddInteraction } from '@/lib/data';
 import InteractionLogger from '@/components/InteractionLogger';
 import type { Quote, Client, Interaction, InteractionType, QuoteStatus, DeferReasonCategory } from '@/lib/database.types';
@@ -166,7 +167,7 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
     if (!deferCategory) return;
     const categoryLabel = DEFER_REASON_LABELS[deferCategory];
     const reason = deferReason.trim();
-    const content = reason ? `נדחה (${categoryLabel}): ${reason}` : `נדחה: ${categoryLabel}`;
+    if (!reason) return;
     try {
       await addInteraction.mutateAsync({
         quoteId: quote.id,
