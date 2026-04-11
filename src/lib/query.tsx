@@ -1,17 +1,63 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, onlineManager, type Mutation } from '@tanstack/react-query';
+import { flushOfflineQueue, pendingMutationCount } from './offline-sync';
+import { globalToast } from './toast';
 
 export function QueryProvider({ children }: { children: ReactNode }) {
-  const [client] = useState(() => new QueryClient({
-    defaultOptions: {
-      queries: {
-        staleTime: 30_000,
-        gcTime: 5 * 60_000,
-        refetchOnWindowFocus: false,
-        retry: 1,
+  const [client] = useState(() => {
+    const qc = new QueryClient({
+      defaultOptions: {
+        queries: {
+          staleTime: 30_000,
+          gcTime: 5 * 60_000,
+          refetchOnWindowFocus: false,
+          retry: 1,
+        },
+        mutations: {
+          retry: 1,
+        },
       },
-    },
-  }));
+    });
+
+    // Global mutation error handler — catches ANY mutation that throws
+    // without its own onError callback. Shows a visible toast so failures
+    // are never silent.
+    const cache = qc.getMutationCache();
+    cache.config = {
+      ...cache.config,
+      onError: (error: Error, _variables: unknown, _context: unknown, mutation: Mutation) => {
+        // Skip if the mutation already has its own onError (avoid double-toast)
+        if (mutation.options.onError) return;
+        console.error('[mutation] Unhandled error:', error.message);
+        globalToast(`שגיאה: ${error.message}`, 'error');
+      },
+    };
+
+    return qc;
+  });
+
+  // Flush offline queue when coming back online
+  useEffect(() => {
+    const handleOnline = async () => {
+      const pending = pendingMutationCount();
+      if (pending > 0) {
+        console.info(`[offline-sync] Back online — flushing ${pending} queued mutations`);
+        const { flushed, failed, skipped, orphanedRows } = await flushOfflineQueue();
+        console.info(`[offline-sync] Flushed: ${flushed}, Failed: ${failed}, Skipped: ${skipped}, Orphaned: ${orphanedRows.length}`);
+        // Invalidate all queries to pick up synced data (including orphan removals)
+        if (flushed > 0 || orphanedRows.length > 0) {
+          client.invalidateQueries();
+        }
+        if (orphanedRows.length > 0) {
+          console.warn('[offline-sync] Orphaned rows (deleted on server):', orphanedRows);
+        }
+      }
+    };
+    window.addEventListener('online', handleOnline);
+    // Also flush on mount (app may have been opened while offline then regained connection)
+    if (navigator.onLine) handleOnline();
+    return () => window.removeEventListener('online', handleOnline);
+  }, [client]);
 
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }

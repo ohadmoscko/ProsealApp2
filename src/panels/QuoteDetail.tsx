@@ -167,7 +167,16 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
     if (!deferCategory) return;
     const categoryLabel = DEFER_REASON_LABELS[deferCategory];
     const reason = deferReason.trim();
-    if (!reason) return;
+    const content = reason ? `נדחה (${categoryLabel}): ${reason}` : `נדחה: ${categoryLabel}`;
+
+    // Sanitization gate: block financial data / phone numbers in defer reason
+    const check = detectSensitiveContent(content);
+    if (check.blocked) {
+      toast(check.reason!, 'error');
+      console.warn('[sanitization] Blocked deferral content:', check.match);
+      return;
+    }
+
     try {
       await addInteraction.mutateAsync({
         quoteId: quote.id,
