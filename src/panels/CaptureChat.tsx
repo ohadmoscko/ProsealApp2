@@ -5,12 +5,12 @@ import type { Capture } from '@/lib/database.types';
 
 /** Category badge for AI-parsed captures */
 const CATEGORY_COLORS: Record<string, string> = {
-  'הצעה': 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300',
-  'משלוח': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
-  'תקלה': 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300',
-  'לקוח': 'bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300',
-  'הודעה_למנכל': 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
-  'כללי': 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800/40 dark:text-zinc-400',
+  'הצעה': 'bg-blue-950/40 text-blue-300 light:bg-blue-100 light:text-blue-700',
+  'משלוח': 'bg-emerald-950/40 text-emerald-300 light:bg-emerald-100 light:text-emerald-700',
+  'תקלה': 'bg-red-950/40 text-red-300 light:bg-red-100 light:text-red-700',
+  'לקוח': 'bg-violet-950/40 text-violet-300 light:bg-violet-100 light:text-violet-700',
+  'הודעה_למנכל': 'bg-amber-950/40 text-amber-300 light:bg-amber-100 light:text-amber-700',
+  'כללי': 'bg-zinc-800/40 text-zinc-400 light:bg-zinc-100 light:text-zinc-500',
 };
 
 function categoryLabel(cat: string): string {
@@ -78,7 +78,7 @@ function CaptureRow({ capture: c }: { capture: Capture }) {
         <div className={cn(
           'max-w-[80%] rounded-2xl rounded-br-md px-4 py-2.5',
           c.raw_text.startsWith('/מאור')
-            ? 'bg-amber-100/60 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800'
+            ? 'bg-amber-950/30 border border-amber-800 light:bg-amber-100/60 light:border-amber-200'
             : 'bg-(--color-accent)/10',
         )}>
           <p className="text-sm text-(--color-text)">{c.raw_text}</p>
@@ -95,7 +95,7 @@ function CaptureRow({ capture: c }: { capture: Capture }) {
               </span>
             )}
             {importance === 'high' && (
-              <span className="text-[9px] font-bold text-red-600 dark:text-red-400">חשוב</span>
+              <span className="text-[9px] font-bold text-red-400 light:text-red-600">חשוב</span>
             )}
           </div>
         </div>

@@ -209,13 +209,10 @@ export function useCaptures() {
   return useQuery({
     queryKey: ['captures'],
     queryFn: async () => {
-      const since = new Date();
-      since.setDate(since.getDate() - 7);
-
+      // הוסר הסינון המגביל של 7 ימים - כעת נמשכת כל ההיסטוריה הגלובלית!
       const { data, error } = await supabase
         .from('captures')
         .select('*')
-        .gte('created_at', since.toISOString())
         .order('created_at', { ascending: false });
 
       if (error) throw new Error(error.message);

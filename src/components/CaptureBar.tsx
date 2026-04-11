@@ -2,6 +2,7 @@ import { useState, type KeyboardEvent, type RefObject } from 'react';
 import { cn } from '@/lib/utils';
 import { useAddCapture } from '@/lib/data';
 import { useToast } from '@/lib/toast';
+import { detectSensitiveContent } from '@/lib/sanitization';
 
 interface CaptureBarProps {
   inputRef?: RefObject<HTMLInputElement | null>;
@@ -26,11 +27,20 @@ export default function CaptureBar({ inputRef }: CaptureBarProps) {
     const trimmed = text.trim();
     if (!trimmed || addCapture.isPending) return;
 
+    // ── Sanitization gate: block financial data / phone numbers ──
+    const check = detectSensitiveContent(trimmed);
+    if (check.blocked) {
+      toast(check.reason!, 'error');
+      console.warn('[sanitization] Blocked capture content:', check.match);
+      return;
+    }
+
     try {
       await addCapture.mutateAsync(trimmed);
       setText('');
-    } catch {
-      toast('שגיאה בשמירת האירוע', 'error');
+    } catch (error: any) {
+      console.error(error);
+      toast(`שגיאה בשמירת האירוע: ${error?.message || 'שגיאת מסד נתונים'}`, 'error');
     } finally {
       inputRef?.current?.focus();
     }
@@ -77,7 +87,7 @@ export default function CaptureBar({ inputRef }: CaptureBarProps) {
           className={cn(
             'flex-1 rounded-xl border px-4 py-2.5 text-sm text-(--color-text) outline-none placeholder:text-(--color-text-secondary)/50 transition-colors',
             activeSlash
-              ? 'border-amber-400 bg-amber-50/50 dark:bg-amber-950/10 dark:border-amber-700'
+              ? 'border-amber-700 bg-amber-950/10 light:border-amber-400 light:bg-amber-50/50'
               : 'border-(--color-border) bg-(--color-surface-dim) focus:border-(--color-accent)',
           )}
           dir="rtl"
@@ -95,7 +105,7 @@ export default function CaptureBar({ inputRef }: CaptureBarProps) {
       {/* Active slash command indicator */}
       {activeSlash && (
         <div className="mx-auto max-w-3xl mt-1">
-          <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+          <span className="text-[10px] font-semibold text-amber-400 light:text-amber-600">
             {activeSlash.label}
           </span>
         </div>

@@ -338,9 +338,9 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
                     className={cn(
                       'rounded px-1.5 py-0.5 text-[10px] font-bold transition-colors',
                       quote.strategic_rank === r
-                        ? r === 1 ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300'
-                          : r === 2 ? 'bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300'
-                            : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800/40 dark:text-zinc-400'
+                        ? r === 1 ? 'bg-red-950/40 text-red-300 light:bg-red-100 light:text-red-700'
+                          : r === 2 ? 'bg-orange-950/40 text-orange-300 light:bg-orange-100 light:text-orange-700'
+                            : 'bg-zinc-800/40 text-zinc-400 light:bg-zinc-100 light:text-zinc-600'
                         : 'text-(--color-text-secondary)/30 hover:text-(--color-text-secondary)/60',
                     )}
                     title={STRATEGIC_RANK_LABELS[r]}
@@ -354,8 +354,8 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
 
           {/* ── Loss reason prompt ── */}
           {pendingLost && (
-            <div className="mt-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20 p-3 space-y-2 animate-fade-in">
-              <p className="text-xs font-bold text-red-700 dark:text-red-400">סיבת הפסד</p>
+            <div className="mt-3 rounded-lg border border-red-800 bg-red-950/20 light:border-red-200 light:bg-red-50 p-3 space-y-2 animate-fade-in">
+              <p className="text-xs font-bold text-red-400 light:text-red-700">סיבת הפסד</p>
               <input
                 value={lossReason}
                 onChange={(e) => setLossReason(e.target.value)}
@@ -393,7 +393,7 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
           {/* ── Ice-breaker tag ── */}
           {latestIceBreaker && (
             <div className="mt-1.5 flex items-center gap-1.5">
-              <span className="text-xs font-semibold text-violet-600 dark:text-violet-400">שובר קרח:</span>
+              <span className="text-xs font-semibold text-violet-400 light:text-violet-600">שובר קרח:</span>
               <span className="text-xs text-(--color-text)">{latestIceBreaker}</span>
             </div>
           )}
@@ -419,7 +419,7 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
               </span>
             )}
             {quote.loss_reason && (
-              <span className="text-red-600 dark:text-red-400 font-semibold">
+              <span className="text-red-400 light:text-red-600 font-semibold">
                 הפסד: {quote.loss_reason}
               </span>
             )}
@@ -449,7 +449,7 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
               className={cn(
                 'rounded-lg border px-3 py-1.5 text-xs font-medium text-(--color-warning) transition-colors',
                 showDeferPanel
-                  ? 'border-(--color-warning)/50 bg-amber-50 dark:bg-amber-950/20'
+                  ? 'border-(--color-warning)/50 bg-amber-950/20 light:bg-amber-50'
                   : 'border-(--color-border) hover:bg-(--color-surface-dim)',
               )}
             >
@@ -459,14 +459,14 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
               <>
                 <button
                   onClick={openWhatsApp}
-                  className="rounded-lg border border-emerald-300 dark:border-emerald-700 px-3 py-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 transition-colors"
+                  className="rounded-lg border border-emerald-700 light:border-emerald-300 px-3 py-1.5 text-xs font-medium text-emerald-400 light:text-emerald-600 hover:bg-emerald-950/20 light:hover:bg-emerald-50 transition-colors"
                 >
                   שלח WA
                 </button>
                 {quote.sales_ammo.length > 0 && (
                   <button
                     onClick={openWhatsAppWithAmmo}
-                    className="rounded-lg border border-emerald-300 dark:border-emerald-700 px-3 py-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 transition-colors"
+                    className="rounded-lg border border-emerald-700 light:border-emerald-300 px-3 py-1.5 text-xs font-medium text-emerald-400 light:text-emerald-600 hover:bg-emerald-950/20 light:hover:bg-emerald-50 transition-colors"
                     title="שלח הודעה עם נקודות חוזק"
                   >
                     WA + נק' חוזק
@@ -475,45 +475,58 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
               </>
             )}
             {quote.local_file_path && (
-              isTauri ? (
-                <>
-                  <button
-                    onClick={async () => {
-                      const ok = await copyToClipboard(quote.local_file_path!);
-                      toast(ok ? 'הנתיב הועתק' : 'ההעתקה נכשלה', ok ? 'success' : 'error');
-                    }}
-                    className="rounded-lg border border-(--color-border) px-3 py-1.5 text-xs font-medium text-(--color-text-secondary) hover:bg-(--color-surface-dim) transition-colors"
-                    title={quote.local_file_path}
-                  >
-                    העתק נתיב
-                  </button>
-                  <button
-                    onClick={async () => {
-                      const ok = await openFileLocation(quote.local_file_path!);
-                      if (!ok) toast('לא ניתן לפתוח תיקייה', 'error');
-                    }}
-                    className="rounded-lg border border-(--color-border) px-3 py-1.5 text-xs font-medium text-(--color-text-secondary) hover:bg-(--color-surface-dim) transition-colors"
-                  >
-                    פתח תיקייה
-                  </button>
-                </>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <span className="rounded-lg border border-dashed border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/20 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-400">
-                    גישה לקבצים מוגבלת במצב ענן. יש לבקש גישה דרך ה-ERP או להתחבר דרך VPN
+              <>
+                {/* Copy path — works on both Tauri and web (clipboard API fallback) */}
+                <button
+                  onClick={async () => {
+                    const ok = await copyToClipboard(quote.local_file_path!);
+                    toast(
+                      ok
+                        ? isTauri ? 'הנתיב הועתק' : 'הנתיב הועתק — השתמש ב-VPN לשליפה'
+                        : 'ההעתקה נכשלה',
+                      ok ? 'success' : 'error',
+                    );
+                  }}
+                  className={cn(
+                    'rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors',
+                    isTauri
+                      ? 'border-(--color-border) text-(--color-text-secondary) hover:bg-(--color-surface-dim)'
+                      : 'border-amber-700 light:border-amber-300 text-amber-400 light:text-amber-700 hover:bg-amber-950/20 light:hover:bg-amber-50',
+                  )}
+                  title={quote.local_file_path}
+                >
+                  העתק נתיב
+                </button>
+
+                {/* Open folder — Tauri only; disabled with tooltip in web mode */}
+                <button
+                  onClick={isTauri ? async () => {
+                    const ok = await openFileLocation(quote.local_file_path!);
+                    if (!ok) toast('לא ניתן לפתוח תיקייה', 'error');
+                  } : undefined}
+                  disabled={!isTauri}
+                  className={cn(
+                    'rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors',
+                    isTauri
+                      ? 'border-(--color-border) text-(--color-text-secondary) hover:bg-(--color-surface-dim)'
+                      : 'border-(--color-border)/50 text-(--color-text-secondary)/30 cursor-not-allowed',
+                  )}
+                  title={
+                    isTauri
+                      ? 'פתח תיקייה במערכת הקבצים'
+                      : 'פתיחת קבצים זמינה רק באפליקציית הדסקטופ (Tauri). במצב דפדפן, העתק את הנתיב והשתמש ב-VPN.'
+                  }
+                >
+                  פתח תיקייה
+                </button>
+
+                {/* Cloud-mode notice — web only */}
+                {!isTauri && (
+                  <span className="rounded-lg border border-dashed border-amber-700 bg-amber-950/20 light:border-amber-300 light:bg-amber-50 px-3 py-1.5 text-xs text-amber-400 light:text-amber-700">
+                    מצב ענן — גישה לקבצים דרך VPN בלבד
                   </span>
-                  <button
-                    onClick={async () => {
-                      const ok = await copyToClipboard(quote.local_file_path!);
-                      toast(ok ? 'הנתיב הועתק — השתמש ב-VPN לשליפה' : 'ההעתקה נכשלה', ok ? 'success' : 'error');
-                    }}
-                    className="shrink-0 rounded-lg border border-amber-300 dark:border-amber-700 px-3 py-1.5 text-xs font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/20 transition-colors"
-                    title={quote.local_file_path}
-                  >
-                    העתק נתיב
-                  </button>
-                </div>
-              )
+                )}
+              </>
             )}
           </div>
         </div>
@@ -696,7 +709,7 @@ function SingleInteractionRow({ ix }: { ix: Interaction }) {
   return (
     <div className={cn(
       'flex gap-3 border-r-2 pr-4 pb-4',
-      isPending ? 'border-amber-300 dark:border-amber-700 opacity-60' : 'border-(--color-border)',
+      isPending ? 'border-amber-700 light:border-amber-300 opacity-60' : 'border-(--color-border)',
     )}>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
@@ -704,20 +717,20 @@ function SingleInteractionRow({ ix }: { ix: Interaction }) {
             {INTERACTION_LABELS[ix.type] ?? ix.type}
           </span>
           {isPending && (
-            <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 px-1.5 py-0.5 rounded">
+            <span className="text-[10px] font-bold text-amber-400 light:text-amber-600 bg-amber-950/30 light:bg-amber-50 px-1.5 py-0.5 rounded">
               ישוחרר ביום ראשון
             </span>
           )}
           {ix.outcome && (
             <span className={cn(
               'text-xs font-semibold',
-              ix.outcome === 'reached' ? 'text-emerald-600 dark:text-emerald-400' : 'text-(--color-text-secondary)/60',
+              ix.outcome === 'reached' ? 'text-emerald-400 light:text-emerald-600' : 'text-(--color-text-secondary)/60',
             )}>
               {ix.outcome === 'reached' ? 'שוחחנו' : ix.outcome === 'no_answer' ? 'לא ענה' : 'לא זמין'}
             </span>
           )}
           {ix.defer_category && (
-            <span className="text-[10px] font-semibold text-(--color-warning) bg-amber-50 dark:bg-amber-950/20 px-1.5 py-0.5 rounded">
+            <span className="text-[10px] font-semibold text-(--color-warning) bg-amber-950/20 light:bg-amber-50 px-1.5 py-0.5 rounded">
               {DEFER_REASON_LABELS[ix.defer_category]}
             </span>
           )}

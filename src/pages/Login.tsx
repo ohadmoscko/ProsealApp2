@@ -31,7 +31,7 @@ export default function Login() {
         <p className="mb-8 text-sm text-(--color-text-secondary)">המוח השני שלך</p>
 
         {error && (
-          <div className="mb-4 rounded-lg bg-red-50 dark:bg-red-950/30 px-4 py-2 text-sm text-red-600 dark:text-red-400">
+          <div className="mb-4 rounded-lg bg-red-950/30 light:bg-red-50 px-4 py-2 text-sm text-red-400 light:text-red-600">
             {error}
           </div>
         )}

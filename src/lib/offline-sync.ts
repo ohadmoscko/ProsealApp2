@@ -1,17 +1,22 @@
 /**
- * Offline Sync with field-level merging & status protection.
+ * Offline Sync with field-level merging, status protection & timestamp
+ * conflict resolution.
  *
  * Queues mutations when offline, persists to localStorage, and
  * flushes them in order when connectivity returns.
  *
- * Conflict strategy (v2 — enhanced):
+ * Conflict strategy (v3 — timestamp-aware):
  * - INSERT: append-only, idempotent via unique constraints.
- * - UPDATE: field-level merge. Before writing, fetches the current
- *   server row and merges only the fields the user actually changed.
- *   Critical fields (like `status`) have a priority ladder —
- *   a stale offline write cannot downgrade a status that moved
- *   forward on the server (e.g., offline 'open' won't overwrite
- *   server-side 'won').
+ * - UPDATE: three-phase guard:
+ *     1. Timestamp gate — if serverRow.updated_at > mutation.timestamp,
+ *        the server was modified AFTER our offline edit ⇒ skip entirely.
+ *     2. Field-level merge — only include fields the user actually
+ *        changed vs the current server state.
+ *     3. Status ladder — a stale offline write cannot downgrade a
+ *        status that moved forward on the server.
+ * - DELETE-on-server — if the row no longer exists, discard the
+ *   queued mutation and purge any other mutations targeting the
+ *   same row from the queue (orphan cleanup).
  */
 
 import { supabase } from './supabase';
@@ -26,8 +31,16 @@ interface QueuedMutation {
   payload: Record<string, unknown>;
   /** For updates: the row ID to match */
   rowId?: string;
-  /** Wall-clock time when the user made the change */
+  /** Wall-clock time when the user made the change (ISO string) */
   timestamp: string;
+}
+
+export interface FlushResult {
+  flushed: number;
+  failed: number;
+  skipped: number;
+  /** Rows that no longer exist on the server — caller should invalidate caches */
+  orphanedRows: { table: string; rowId: string }[];
 }
 
 const STORAGE_KEY = 'proseal_offline_queue';
@@ -182,29 +195,44 @@ function fieldEqual(a: unknown, b: unknown): boolean {
  * Flush all queued mutations in order.
  * Called when coming back online.
  *
- * For updates: fetches the current server row, merges field-by-field,
- * and protects critical status transitions from downgrade.
+ * Three-phase guard for updates:
+ *  1. Orphan check  — row deleted on server ⇒ discard + purge related mutations
+ *  2. Timestamp gate — server updated_at > mutation timestamp ⇒ skip (stale)
+ *  3. Field merge    — diff remaining fields, protect status ladder
  *
- * Returns { flushed, failed, skipped } counts.
+ * Returns FlushResult with counts + list of orphaned rows for cache invalidation.
  */
-export async function flushOfflineQueue(): Promise<{ flushed: number; failed: number; skipped: number }> {
+export async function flushOfflineQueue(): Promise<FlushResult> {
   const queue = loadQueue();
-  if (queue.length === 0) return { flushed: 0, failed: 0, skipped: 0 };
+  if (queue.length === 0) return { flushed: 0, failed: 0, skipped: 0, orphanedRows: [] };
 
   let flushed = 0;
   let failed = 0;
   let skipped = 0;
   const remaining: QueuedMutation[] = [];
+  const orphanedRows: { table: string; rowId: string }[] = [];
+  /** Track orphaned (table+rowId) so subsequent mutations for the same row are auto-skipped */
+  const orphanedKeys = new Set<string>();
 
   for (const mutation of queue) {
     try {
+      // ── Pre-check: skip if this row was already found orphaned in an earlier pass
+      if (mutation.operation === 'update' && mutation.rowId) {
+        const key = `${mutation.table}:${mutation.rowId}`;
+        if (orphanedKeys.has(key)) {
+          console.info(`[offline-sync] Purging related mutation ${mutation.id} for orphaned ${key}`);
+          skipped++;
+          continue;
+        }
+      }
+
       if (mutation.operation === 'insert') {
         // Inserts are append-only — no merge needed
         const { error } = await (supabase.from(mutation.table) as any).insert(mutation.payload);
         if (error) throw error;
         flushed++;
       } else if (mutation.operation === 'update' && mutation.rowId) {
-        // Step 1: Fetch current server row
+        // ── Phase 1: Fetch current server row
         const { data: serverRow, error: fetchErr } = await (supabase.from(mutation.table) as any)
           .select('*')
           .eq('id', mutation.rowId)
@@ -213,20 +241,45 @@ export async function flushOfflineQueue(): Promise<{ flushed: number; failed: nu
         if (fetchErr) throw fetchErr;
 
         if (!serverRow) {
-          // Row was deleted on server — nothing to update
-          console.warn(`[offline-sync] Row ${mutation.rowId} not found in ${mutation.table}, skipping`);
+          // Row deleted on server — discard this mutation and mark row as orphaned
+          // so any subsequent mutations for the same row are also purged.
+          const key = `${mutation.table}:${mutation.rowId}`;
+          orphanedKeys.add(key);
+          orphanedRows.push({ table: mutation.table, rowId: mutation.rowId });
+          console.warn(
+            `[offline-sync] Row ${mutation.rowId} deleted on server (${mutation.table}). ` +
+            `Discarding mutation ${mutation.id} and purging related queue entries.`,
+          );
           skipped++;
           continue;
         }
 
-        // Step 2: Field-level merge with status protection
+        // ── Phase 2: Timestamp conflict gate
+        // If the server row was updated AFTER our offline mutation was queued,
+        // the server data is authoritative — skip this mutation entirely.
+        const serverUpdatedAt = (serverRow as Record<string, unknown>).updated_at as string | undefined;
+        if (serverUpdatedAt && mutation.timestamp) {
+          const serverTime = new Date(serverUpdatedAt).getTime();
+          const mutationTime = new Date(mutation.timestamp).getTime();
+
+          if (!isNaN(serverTime) && !isNaN(mutationTime) && serverTime > mutationTime) {
+            console.info(
+              `[offline-sync] Timestamp conflict for ${mutation.table}/${mutation.rowId}: ` +
+              `server=${serverUpdatedAt} > mutation=${mutation.timestamp}. Skipping stale write.`,
+            );
+            skipped++;
+            continue;
+          }
+        }
+
+        // ── Phase 3: Field-level merge with status protection
         const patch = mergePayload(
           mutation.table,
           mutation.payload,
           serverRow as Record<string, unknown>,
         );
 
-        // Step 3: Only write if there's something to update
+        // Only write if there's something to update
         if (Object.keys(patch).length === 0) {
           console.info(`[offline-sync] No effective changes for ${mutation.table}/${mutation.rowId}, skipping`);
           skipped++;
@@ -247,7 +300,7 @@ export async function flushOfflineQueue(): Promise<{ flushed: number; failed: nu
   }
 
   saveQueue(remaining);
-  return { flushed, failed, skipped };
+  return { flushed, failed, skipped, orphanedRows };
 }
 
 /** Clear the entire queue (e.g., on logout) */

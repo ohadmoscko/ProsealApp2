@@ -17,7 +17,9 @@ function getSystemTheme(): 'light' | 'dark' {
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
     const stored = localStorage.getItem('theme');
-    return stored === 'light' || stored === 'dark' ? stored : 'system';
+    if (stored === 'light' || stored === 'dark') return stored;
+    // Default to dark — professional, low-fatigue mode
+    return 'dark';
   });
 
   const [systemPref, setSystemPref] = useState<'light' | 'dark'>(getSystemTheme);
@@ -25,7 +27,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const resolved = theme === 'system' ? systemPref : theme;
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', resolved === 'dark');
+    // CSS default is dark; add 'light' class only when light mode is active
+    document.documentElement.classList.toggle('light', resolved === 'light');
   }, [resolved]);
 
   useEffect(() => {

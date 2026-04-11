@@ -72,9 +72,9 @@ export default function AiInternAccordion({ quotes, onFocusQuote }: AiInternAcco
                 {q.strategic_rank && (
                   <span className={cn(
                     'text-[9px] font-bold px-1 py-0.5 rounded shrink-0',
-                    q.strategic_rank === 1 && 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300',
-                    q.strategic_rank === 2 && 'bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300',
-                    q.strategic_rank === 3 && 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800/40 dark:text-zinc-400',
+                    q.strategic_rank === 1 && 'bg-red-950/40 text-red-300 light:bg-red-100 light:text-red-700',
+                    q.strategic_rank === 2 && 'bg-orange-950/40 text-orange-300 light:bg-orange-100 light:text-orange-700',
+                    q.strategic_rank === 3 && 'bg-zinc-800/40 text-zinc-400 light:bg-zinc-100 light:text-zinc-600',
                   )}>
                     {STRATEGIC_RANK_LABELS[q.strategic_rank]}
                   </span>
@@ -121,7 +121,7 @@ export default function AiInternAccordion({ quotes, onFocusQuote }: AiInternAcco
                     <span>טמפרטורה: {tempLabel(q.temperature)}</span>
                     <span>סטטוס: {STATUS_LABELS[q.status]}</span>
                     {q.days_since_contact != null && (
-                      <span className={q.days_since_contact > 4 ? 'text-amber-600 dark:text-amber-400 font-semibold' : ''}>
+                      <span className={q.days_since_contact > 4 ? 'text-amber-400 light:text-amber-600 font-semibold' : ''}>
                         {q.days_since_contact} ימים ללא קשר
                       </span>
                     )}

@@ -23,9 +23,9 @@ const TODAY = new Date().toISOString().slice(0, 10);
 
 /**
  * 3-drawer bucketing:
- *  1. "לטפל עכשיו" — high temp, overdue follow-ups, forgotten quotes
- *  2. "מעקב שגרתי" — normal active quotes
- *  3. "הכדור אצל הלקוח" — waiting on client response
+ * 1. "לטפל עכשיו" — high temp, overdue follow-ups, forgotten quotes
+ * 2. "מעקב שגרתי" — normal active quotes
+ * 3. "הכדור אצל הלקוח" — waiting on client response
  */
 function bucketQuotes(quotes: (Quote & { client?: Client })[], focusMode: boolean): Drawer[] {
   const actNow:  typeof quotes = [];
@@ -116,7 +116,7 @@ export default function QuoteList({ quotes, selectedId, onSelect, onModeChange, 
         </button>
       </div>
 
-      {/* Drawers */}
+      {/* Drawers / Content Area */}
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
           <div className="space-y-1 p-3">
@@ -124,66 +124,77 @@ export default function QuoteList({ quotes, selectedId, onSelect, onModeChange, 
               <div key={i} className="h-14 rounded-lg bg-(--color-border)/30 animate-pulse" />
             ))}
           </div>
-        ) : drawers.map((drawer) => (
-          <div key={drawer.key}>
-            <div className={cn(
-              'sticky top-0 px-4 py-2 text-xs font-bold uppercase tracking-wide border-b border-(--color-border)/50',
-              drawer.key === 'act_now'
-                ? 'bg-red-50 text-red-700 dark:bg-red-950/20 dark:text-red-400'
-                : drawer.key === 'waiting'
-                  ? 'bg-sky-50 text-sky-700 dark:bg-sky-950/20 dark:text-sky-400'
-                  : 'bg-(--color-surface-dim) text-(--color-text-secondary)',
-            )}>
-              {drawer.label}
-              <span className="mr-1 opacity-60">({drawer.quotes.length})</span>
-            </div>
-            {drawer.quotes.length === 0 ? (
-              <div className="px-4 py-3 text-xs text-(--color-text-secondary)/50">אין הצעות</div>
-            ) : (
-              drawer.quotes.map((q) => (
-                <button
-                  key={q.id}
-                  onClick={() => onSelect(q.id)}
-                  className={cn(
-                    'w-full px-4 py-3 text-right transition-colors border-b border-(--color-border)/30',
-                    selectedId === q.id
-                      ? 'bg-(--color-accent)/8'
-                      : 'hover:bg-(--color-surface-dim)/60',
-                  )}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-(--color-text)">{q.quote_number}</span>
-                      {q.strategic_rank && (
-                        <span className={cn(
-                          'text-[10px] font-bold px-1.5 py-0.5 rounded',
-                          q.strategic_rank === 1 && 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300',
-                          q.strategic_rank === 2 && 'bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300',
-                          q.strategic_rank === 3 && 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800/40 dark:text-zinc-400',
-                        )}>
-                          {STRATEGIC_RANK_LABELS[q.strategic_rank]}
+        ) : mode === 'quotes' ? (
+          drawers.map((drawer) => (
+            <div key={drawer.key}>
+              <div className={cn(
+                'sticky top-0 px-4 py-2 text-xs font-bold uppercase tracking-wide border-b border-(--color-border)/50',
+                drawer.key === 'act_now'
+                  ? 'bg-red-950/20 text-red-400 light:bg-red-50 light:text-red-700'
+                  : drawer.key === 'waiting'
+                    ? 'bg-sky-950/20 text-sky-400 light:bg-sky-50 light:text-sky-700'
+                    : 'bg-(--color-surface-dim) text-(--color-text-secondary)',
+              )}>
+                {drawer.label}
+                <span className="mr-1 opacity-60">({drawer.quotes.length})</span>
+              </div>
+              {drawer.quotes.length === 0 ? (
+                <div className="px-4 py-3 text-xs text-(--color-text-secondary)/50">אין הצעות</div>
+              ) : (
+                drawer.quotes.map((q) => (
+                  <button
+                    key={q.id}
+                    onClick={() => onSelect(q.id)}
+                    className={cn(
+                      'w-full px-4 py-3 text-right transition-colors border-b border-(--color-border)/30',
+                      selectedId === q.id
+                        ? 'bg-(--color-accent)/8'
+                        : 'hover:bg-(--color-surface-dim)/60',
+                    )}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-(--color-text)">{q.quote_number}</span>
+                        {q.strategic_rank && (
+                          <span className={cn(
+                            'text-[10px] font-bold px-1.5 py-0.5 rounded',
+                            q.strategic_rank === 1 && 'bg-red-950/40 text-red-300 light:bg-red-100 light:text-red-700',
+                            q.strategic_rank === 2 && 'bg-orange-950/40 text-orange-300 light:bg-orange-100 light:text-orange-700',
+                            q.strategic_rank === 3 && 'bg-zinc-800/40 text-zinc-400 light:bg-zinc-100 light:text-zinc-600',
+                          )}>
+                            {STRATEGIC_RANK_LABELS[q.strategic_rank]}
+                          </span>
+                        )}
+                      </div>
+                      <span className={cn('text-xs font-bold', tempColor(q.temperature))}>
+                        {'●'.repeat(q.temperature)}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-xs text-(--color-text-secondary)">
+                      {q.client?.code ?? '—'}
+                      <span className="mx-1.5 text-(--color-border)">|</span>
+                      <span>{STATUS_LABELS[q.status]}</span>
+                      {q.days_since_contact != null && q.days_since_contact >= 4 && (
+                        <span className="mr-1.5 text-amber-400 light:text-amber-600 font-semibold">
+                          {q.days_since_contact}d
                         </span>
                       )}
                     </div>
-                    <span className={cn('text-xs font-bold', tempColor(q.temperature))}>
-                      {'●'.repeat(q.temperature)}
-                    </span>
-                  </div>
-                  <div className="mt-0.5 text-xs text-(--color-text-secondary)">
-                    {q.client?.code ?? '—'}
-                    <span className="mx-1.5 text-(--color-border)">|</span>
-                    <span>{STATUS_LABELS[q.status]}</span>
-                    {q.days_since_contact != null && q.days_since_contact >= 4 && (
-                      <span className="mr-1.5 text-amber-600 dark:text-amber-400 font-semibold">
-                        {q.days_since_contact}d
-                      </span>
-                    )}
-                  </div>
-                </button>
-              ))
-            )}
+                  </button>
+                ))
+              )}
+            </div>
+          ))
+        ) : mode === 'captures' ? (
+          <div className="p-6 text-center text-(--color-text-secondary) text-sm">
+            <p className="font-bold mb-2">יומן אירועים מתגלגל</p>
+            כאן יוצגו האירועים והתיעוד השוטף (Rolling Log).
           </div>
-        ))}
+        ) : (
+          <div className="p-6 text-center text-(--color-text-secondary) text-sm">
+            מעבר לדוח המנכ"ל...
+          </div>
+        )}
       </div>
     </div>
   );

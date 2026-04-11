@@ -3,10 +3,10 @@ import { cn } from '@/lib/utils';
 import { useGenerateWeeklyReport, type WeeklyReport as WeeklyReportData } from '@/lib/data';
 
 const MOOD_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  positive: { bg: 'bg-emerald-50 dark:bg-emerald-950/20', text: 'text-emerald-700 dark:text-emerald-300', label: 'תקין' },
-  neutral:  { bg: 'bg-sky-50 dark:bg-sky-950/20', text: 'text-sky-700 dark:text-sky-300', label: 'שגרתי' },
-  warning:  { bg: 'bg-amber-50 dark:bg-amber-950/20', text: 'text-amber-700 dark:text-amber-300', label: 'דורש תשומת לב' },
-  critical: { bg: 'bg-red-50 dark:bg-red-950/20', text: 'text-red-700 dark:text-red-300', label: 'דחוף' },
+  positive: { bg: 'bg-emerald-950/20 light:bg-emerald-50', text: 'text-emerald-300 light:text-emerald-700', label: 'תקין' },
+  neutral:  { bg: 'bg-sky-950/20 light:bg-sky-50', text: 'text-sky-300 light:text-sky-700', label: 'שגרתי' },
+  warning:  { bg: 'bg-amber-950/20 light:bg-amber-50', text: 'text-amber-300 light:text-amber-700', label: 'דורש תשומת לב' },
+  critical: { bg: 'bg-red-950/20 light:bg-red-50', text: 'text-red-300 light:text-red-700', label: 'דחוף' },
 };
 
 export default function WeeklyReport() {
@@ -66,7 +66,7 @@ export default function WeeklyReport() {
         )}
 
         {generateReport.isError && !report && (
-          <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20 p-4 text-sm text-red-700 dark:text-red-300">
+          <div className="rounded-lg border border-red-800 bg-red-950/20 p-4 text-sm text-red-300 light:border-red-200 light:bg-red-50 light:text-red-700">
             שגיאה ביצירת הדוח. ודא שהגדרת את ANTHROPIC_API_KEY בהגדרות Supabase.
             <br />
             <span className="text-xs opacity-70">{generateReport.error?.message}</span>
@@ -132,7 +132,7 @@ export default function WeeklyReport() {
             {/* Risks */}
             {report.risks.length > 0 && (
               <section>
-                <h3 className="text-sm font-bold text-red-600 dark:text-red-400 mb-2">סיכונים</h3>
+                <h3 className="text-sm font-bold text-red-400 light:text-red-600 mb-2">סיכונים</h3>
                 <ul className="space-y-1.5">
                   {report.risks.map((r, i) => (
                     <li key={i} className="flex items-start gap-2 text-sm text-(--color-text)">
@@ -147,7 +147,7 @@ export default function WeeklyReport() {
             {/* Action items */}
             {report.action_items.length > 0 && (
               <section>
-                <h3 className="text-sm font-bold text-amber-600 dark:text-amber-400 mb-2">פעולות נדרשות</h3>
+                <h3 className="text-sm font-bold text-amber-400 light:text-amber-600 mb-2">פעולות נדרשות</h3>
                 <ul className="space-y-1.5">
                   {report.action_items.map((a, i) => (
                     <li key={i} className="flex items-start gap-2 text-sm text-(--color-text)">
@@ -167,7 +167,7 @@ export default function WeeklyReport() {
                   {report.ceo_messages.map((m, i) => (
                     <div
                       key={i}
-                      className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/10 px-4 py-2.5 text-sm text-(--color-text)"
+                      className="rounded-lg border border-amber-800 bg-amber-950/10 light:border-amber-200 light:bg-amber-50/50 px-4 py-2.5 text-sm text-(--color-text)"
                     >
                       {m}
                     </div>
@@ -199,8 +199,8 @@ function StatCard({ label, value, accent, positive, negative }: {
       <div className={cn(
         'text-xl font-bold',
         accent && 'text-(--color-accent)',
-        positive && 'text-emerald-600 dark:text-emerald-400',
-        negative && value > 0 && 'text-red-600 dark:text-red-400',
+        positive && 'text-emerald-400 light:text-emerald-600',
+        negative && value > 0 && 'text-red-400 light:text-red-600',
         !accent && !positive && !negative && 'text-(--color-text)',
       )}>
         {value}

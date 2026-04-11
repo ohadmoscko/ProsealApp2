@@ -23,11 +23,14 @@ export function QueryProvider({ children }: { children: ReactNode }) {
       const pending = pendingMutationCount();
       if (pending > 0) {
         console.info(`[offline-sync] Back online — flushing ${pending} queued mutations`);
-        const { flushed, failed, skipped } = await flushOfflineQueue();
-        console.info(`[offline-sync] Flushed: ${flushed}, Failed: ${failed}, Skipped: ${skipped}`);
-        // Invalidate all queries to pick up synced data
-        if (flushed > 0) {
+        const { flushed, failed, skipped, orphanedRows } = await flushOfflineQueue();
+        console.info(`[offline-sync] Flushed: ${flushed}, Failed: ${failed}, Skipped: ${skipped}, Orphaned: ${orphanedRows.length}`);
+        // Invalidate all queries to pick up synced data (including orphan removals)
+        if (flushed > 0 || orphanedRows.length > 0) {
           client.invalidateQueries();
+        }
+        if (orphanedRows.length > 0) {
+          console.warn('[offline-sync] Orphaned rows (deleted on server):', orphanedRows);
         }
       }
     };

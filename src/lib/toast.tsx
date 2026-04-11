@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { cn } from './utils';
 
 type ToastType = 'info' | 'success' | 'error';
@@ -17,6 +17,15 @@ const ToastContext = createContext<ToastState | null>(null);
 
 let nextId = 0;
 
+// ── Global toast (works outside React tree) ───────────────────────────────
+let _globalToastFn: ((message: string, type?: ToastType) => void) | null = null;
+
+/** Fire a toast from anywhere — hooks, query cache callbacks, non-React code */
+export function globalToast(message: string, type: ToastType = 'error') {
+  if (_globalToastFn) _globalToastFn(message, type);
+  else console.error('[toast]', message);
+}
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -27,6 +36,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 3000);
   }, []);
+
+  // Register the global toast dispatcher
+  useEffect(() => {
+    _globalToastFn = toast;
+    return () => { _globalToastFn = null; };
+  }, [toast]);
 
   return (
     <ToastContext.Provider value={{ toast }}>

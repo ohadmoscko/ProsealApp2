@@ -3,11 +3,28 @@
 @theme {
   --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, Consolas, monospace;
-  --color-accent: #1a1a2e;
-  --color-accent-light: #2d2d4a;
-  --color-surface: #f8fafc;
-  --color-surface-dim: #f1f5f9;
-  --color-border: #e2e8f0;
+  /* Default = dark mode (quiet, professional) */
+  --color-accent: #818cf8;
+  --color-accent-light: #a5b4fc;
+  --color-surface: #0f172a;
+  --color-surface-dim: #1e293b;
+  --color-border: #334155;
+  --color-text: #e2e8f0;
+  --color-text-secondary: #94a3b8;
+  --color-danger: #ef4444;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+}
+
+@custom-variant light (&:where(.light, .light *));
+
+/* Light mode override — warm muted, never pure white */
+.light {
+  --color-accent: #4f46e5;
+  --color-accent-light: #6366f1;
+  --color-surface: #f1f5f9;
+  --color-surface-dim: #e2e8f0;
+  --color-border: #cbd5e1;
   --color-text: #1e293b;
   --color-text-secondary: #64748b;
   --color-danger: #dc2626;
@@ -15,22 +32,14 @@
   --color-warning: #d97706;
 }
 
-@custom-variant dark (&:where(.dark, .dark *));
-
-/* Dark mode overrides */
-.dark {
-  --color-accent: #a5b4fc;
-  --color-accent-light: #818cf8;
-  --color-surface: #0f172a;
-  --color-surface-dim: #1e293b;
-  --color-border: #334155;
-  --color-text: #f1f5f9;
-  --color-text-secondary: #94a3b8;
-}
-
 html {
   font-family: var(--font-sans);
   direction: rtl;
+  color-scheme: dark;
+}
+
+.light {
+  color-scheme: light;
 }
 
 body {

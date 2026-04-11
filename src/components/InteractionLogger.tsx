@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useAddInteraction } from '@/lib/data';
 import { useToast } from '@/lib/toast';
+import { detectSensitiveContent } from '@/lib/sanitization';
 import type { InteractionType, InteractionOutcome } from '@/lib/database.types';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -69,6 +70,14 @@ export default function InteractionLogger({ quoteId, type, onClose }: Interactio
     content: string,
     followUpDate: string | undefined,
   ) {
+    // ── Sanitization gate: block financial data / phone numbers ──
+    const check = detectSensitiveContent(content);
+    if (check.blocked) {
+      toast(check.reason!, 'error');
+      console.warn('[sanitization] Blocked interaction content:', check.match);
+      return;
+    }
+
     try {
       await addInteraction.mutateAsync({
         quoteId,
@@ -79,8 +88,9 @@ export default function InteractionLogger({ quoteId, type, onClose }: Interactio
       });
       toast('נרשם בהצלחה', 'success');
       onClose();
-    } catch {
-      toast('שגיאה בשמירה', 'error');
+    } catch (error: any) {
+      console.error(error);
+      toast(`שגיאה בשמירה: ${error?.message || 'שגיאת רשת'}`, 'error');
     }
   }
 

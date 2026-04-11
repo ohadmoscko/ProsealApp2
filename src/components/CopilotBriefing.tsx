@@ -139,8 +139,8 @@ export default function CopilotBriefing({ quotes, onFocusQuote }: CopilotBriefin
               <span
                 className={cn(
                   'text-xs',
-                  line.severity === 'danger' && 'font-semibold text-red-600 dark:text-red-400',
-                  line.severity === 'warn' && 'font-semibold text-amber-600 dark:text-amber-400',
+                  line.severity === 'danger' && 'font-semibold text-red-400 light:text-red-600',
+                  line.severity === 'warn' && 'font-semibold text-amber-400 light:text-amber-600',
                   line.severity === 'info' && 'text-(--color-text)',
                   line.severity === 'muted' && 'text-(--color-text-secondary)/60',
                 )}
