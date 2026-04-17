@@ -3,7 +3,8 @@
 export type UserRole = 'admin' | 'viewer_commenter' | 'contributor' | 'readonly';
 export type WeekStatus = 'draft' | 'sent' | 'read' | 'responded';
 export type ItemImportance = 'normal' | 'medium' | 'high';
-export type QuoteStatus = 'new' | 'open' | 'waiting' | 'follow_up' | 'won' | 'lost' | 'dormant';
+// [Req #157, #222, #240] - Extended quote statuses
+export type QuoteStatus = 'new' | 'open' | 'waiting' | 'follow_up' | 'won' | 'lost' | 'dormant' | 'verbal_approval' | 'in_production' | 'shipped';
 export type InteractionType = 'call' | 'whatsapp' | 'email' | 'note' | 'system';
 export type CaptureStatus = 'pending' | 'processed' | 'in_report' | 'dismissed';
 export type InteractionOutcome = 'reached' | 'no_answer' | 'unavailable';
@@ -11,11 +12,29 @@ export type DeferReasonCategory = 'client_abroad' | 'awaiting_technical' | 'pric
 export type ReleaseStatus = 'immediate' | 'pending' | 'released';
 export type TelemetryAction = 'expand' | 'collapse' | 'pin' | 'unpin' | 'refresh' | 'drill_down';
 
+// [Req #204] CEO feedback-to-action conversion
+export type CeoFeedbackType = 'action' | 'note' | 'dismiss' | 'escalate';
+export type CeoActionStatus = 'open' | 'in_progress' | 'done' | 'cancelled';
+
+// [Req #105] - Preferred communication channel
+export type PreferredChannel = 'whatsapp' | 'email' | 'phone';
+
+// [Req #101] - Customer tenure/style
+export type CustomerStyle = 'new' | 'recurring' | 'veteran' | 'one_time';
+
+// [Req #178] - Interaction direction (push=we initiated, pull=client initiated)
+export type InteractionDirection = 'push' | 'pull';
+
+// [Req #65] - Audit log action types
+export type AuditAction = 'INSERT' | 'UPDATE' | 'DELETE' | 'SOFT_DELETE';
+
 export interface Profile {
   id: string;
   email: string;
   display_name: string;
   role: UserRole;
+  vacation_mode: boolean;         // [Req #138] Vacation mode flag
+  vacation_until: string | null;  // [Req #138] Auto-disable vacation after date
   created_at: string;
   updated_at: string;
 }
@@ -78,6 +97,10 @@ export interface Client {
   is_vip: boolean;
   vip_set_at: string | null;
   vip_set_by: string | null;
+  preferred_channel: PreferredChannel;  // [Req #105]
+  customer_style: CustomerStyle;         // [Req #101]
+  relationship_strength: number;         // [Req #104] 0-100
+  is_new_customer: boolean;              // [Req #170]
   deleted_at: string | null;
   created_by: string | null;
   created_at: string;
@@ -92,13 +115,17 @@ export interface Quote {
   status: QuoteStatus;
   temperature: number;
   local_file_path: string | null;
+  is_lead: boolean; // [Req #139] Pre-sale lead flag
   follow_up_date: string | null;
   follow_up_rule: string | null;
   loss_reason: string | null;
-  strategic_rank: number | null; // 1=critical, 2=important, 3=routine
+  win_reason: string | null;              // [Req #121] mandatory close documentation on won deals
+  strategic_rank: number | null;          // 1=critical, 2=important, 3=routine
   sales_ammo: string[];
   ai_summary: string | null;
   ai_summary_at: string | null;
+  owner_id: string | null;               // [Req #146] case owner for multi-user
+  temp_override: boolean;                 // [Req #268] manual temp supersedes auto-decay
   opened_at: string;
   last_contact_at: string | null;
   days_since_contact: number | null;
@@ -117,6 +144,9 @@ export interface Interaction {
   ice_breaker_tag: string | null;
   defer_reason: string | null;
   defer_category: DeferReasonCategory | null;
+  direction: InteractionDirection;         // [Req #178] push=we initiated, pull=client initiated
+  micro_text: string | null;               // [Req #239] 1-2 keyword memory anchor
+  is_milestone: boolean;                   // [Req #112] highlighted timeline events
   release_status: ReleaseStatus;
   release_at: string | null;
   deleted_at: string | null;
@@ -131,6 +161,18 @@ export interface AiTrainingTelemetry {
   action_type: TelemetryAction;
   metadata: Record<string, unknown>;
   created_at: string;
+}
+
+// [Req #65] - Full audit log
+export interface AuditLog {
+  id: string;
+  table_name: string;
+  record_id: string;
+  action: AuditAction;
+  changed_by: string | null;
+  old_data: Record<string, unknown> | null;
+  new_data: Record<string, unknown> | null;
+  changed_at: string;
 }
 
 export interface Capture {
@@ -156,6 +198,13 @@ export interface Database {
         Row: Profile;
         Insert: InsertRow<Profile, 'id' | 'email' | 'display_name' | 'role'>;
         Update: Partial<Profile>;
+        Relationships: [];
+      };
+      // [Req #204] CEO feedback-to-action conversion
+      ceo_feedback: {
+        Row: CeoFeedback;
+        Insert: InsertRow<CeoFeedback, 'report_week' | 'category_key' | 'item_index' | 'feedback_type' | 'content' | 'created_by'>;
+        Update: Partial<CeoFeedback>;
         Relationships: [];
       };
       categories: {
@@ -212,10 +261,23 @@ export interface Database {
         Update: Partial<AiTrainingTelemetry>;
         Relationships: [];
       };
+      // [Req #65] - Audit log (admin-only read)
+      audit_log: {
+        Row: AuditLog;
+        Insert: InsertRow<AuditLog, 'table_name' | 'record_id' | 'action'>;
+        Update: Partial<AuditLog>;
+        Relationships: [];
+      };
     };
     Views: {
       quotes_with_triage: {
-        Row: Quote & { effective_temperature: number; auto_temperature: number; staleness: string };
+        Row: Quote & {
+          effective_temperature: number;
+          auto_temperature: number;
+          staleness: string;
+          ui_opacity: number;                    // [Req #275] visual degradation opacity
+          latest_defer_reason: DeferReasonCategory | null; // [Req #161] waiting sub-reason
+        };
         Relationships: [];
       };
     };
@@ -235,6 +297,24 @@ export interface Database {
       capture_status: CaptureStatus;
       defer_reason_category: DeferReasonCategory;
       release_status: ReleaseStatus;
+      ceo_feedback_type: CeoFeedbackType;
+      ceo_action_status: CeoActionStatus;
     };
   };
+}
+
+// [Req #204] CEO feedback record
+export interface CeoFeedback {
+  id: string;
+  report_week: string;
+  category_key: string;
+  item_index: number;
+  feedback_type: CeoFeedbackType;
+  content: string;
+  action_status: CeoActionStatus;
+  assigned_to: string | null;
+  due_date: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
 }

@@ -81,3 +81,173 @@ export function tempLabel(temp: number): string {
   };
   return labels[temp] ?? '';
 }
+
+// ============================================================
+// [Req #12, #81] Weighted prioritization composite score
+// ============================================================
+
+/**
+ * Compute a composite priority score for a quote.
+ * Higher score = more urgent / more important.
+ *
+ * Weights (tuned for Proseal business logic):
+ *   - Effective temperature (1-5):    ×10  (max 50)
+ *   - Strategic rank (1=critical=3pt, 2=important=2pt, 3=routine=1pt): ×8  (max 24)
+ *   - VIP client:                      +15
+ *   - Staleness (days_since_contact):   ×1.5 (capped at 21 = 31.5)
+ *   - Overdue follow-up:               +20
+ *   - Follow-up status:                +10
+ *
+ * Theoretical max ≈ 150. Higher = act first.
+ */
+export function computePriorityScore(
+  temperature: number,
+  daysSinceContact: number | null,
+  strategicRank: number | null,
+  isVip: boolean,
+  followUpDate: string | null,
+  status: string,
+): number {
+  const eff = effectiveTemperature(temperature, daysSinceContact);
+  let score = eff * 10; // [Req #12] base: effective temp
+
+  // [Req #81] Strategic rank bonus (inverted: rank 1=critical → highest bonus)
+  if (strategicRank === 1) score += 24;
+  else if (strategicRank === 2) score += 16;
+  else if (strategicRank === 3) score += 8;
+
+  // [Req #81] VIP bonus
+  if (isVip) score += 15;
+
+  // [Req #12] Staleness factor (capped at 21 days)
+  const dsc = daysSinceContact ?? 0;
+  score += Math.min(dsc, 21) * 1.5;
+
+  // [Req #12] Overdue follow-up boost
+  if (followUpDate) {
+    const today = new Date().toISOString().slice(0, 10);
+    if (followUpDate < today) score += 20;
+  }
+
+  // [Req #12] Follow-up status boost
+  if (status === 'follow_up') score += 10;
+
+  return Math.round(score * 10) / 10;
+}
+
+// ============================================================
+// [Req #15] Time-based ice-breaker opener generation
+// ============================================================
+
+/**
+ * Generate a context-aware ice-breaker opener based on
+ * days since last contact and time of day.
+ *
+ * Returns a Hebrew conversation starter for the operator.
+ */
+export function generateIceBreaker(
+  daysSinceContact: number | null,
+  clientCode: string,
+  lastInteractionType?: string,
+): string {
+  const dsc = daysSinceContact ?? 0;
+  const hour = new Date().getHours();
+
+  // Time-of-day greeting prefix
+  const greeting = hour < 12 ? 'בוקר טוב' : hour < 17 ? 'צהריים טובים' : 'ערב טוב';
+
+  // [Req #15] Context-specific openers based on staleness
+  if (dsc <= 1) {
+    return `${greeting} ${clientCode}, חוזר אלייך בהמשך לשיחה שלנו`;
+  }
+  if (dsc <= 3) {
+    return `${greeting} ${clientCode}, רציתי לעדכן אותך`;
+  }
+  if (dsc <= 7) {
+    const verb = lastInteractionType === 'whatsapp' ? 'ההודעה' : lastInteractionType === 'email' ? 'המייל' : 'השיחה';
+    return `${greeting} ${clientCode}, בהמשך ל${verb} שלנו מלפני כמה ימים`;
+  }
+  if (dsc <= 14) {
+    return `${greeting} ${clientCode}, לא דיברנו כבר שבוע - רציתי לבדוק מה המצב`;
+  }
+  if (dsc <= 30) {
+    return `${greeting} ${clientCode}, עבר זמן מה מאז ששוחחנו - חשבתי עלייך`;
+  }
+  return `${greeting} ${clientCode}, שמח לחזור אלייך אחרי הפסקה`;
+}
+
+// ============================================================
+// [Req #5] Next call topic derivation
+// ============================================================
+
+/**
+ * Derive the next recommended call topic from quote context.
+ * Returns a short Hebrew suggestion for what to discuss.
+ */
+export function deriveNextCallTopic(
+  status: string,
+  temperature: number,
+  daysSinceContact: number | null,
+  followUpDate: string | null,
+  salesAmmo: string[],
+  _lossReason: string | null,
+  aiSummary: string | null,
+): string {
+  const today = new Date().toISOString().slice(0, 10);
+  const isOverdue = followUpDate && followUpDate < today;
+
+  // Priority-ordered topics
+  if (isOverdue) return 'מעקב דחוף — תאריך מעקב עבר';
+  if (status === 'verbal_approval') return 'קבלת אישור רשמי בכתב';
+  if (status === 'in_production') return 'עדכון על מצב הייצור';
+  if (status === 'waiting') return 'בירור — האם קיבלו החלטה?';
+  if (temperature >= 4 && salesAmmo.length > 0) return `חיזוק עמדה: ${salesAmmo[0]}`;
+  if (temperature >= 4) return 'סגירת עסקה — הצעה חמה';
+  if ((daysSinceContact ?? 0) >= 7) return 'שיחת ריענון — שמירת קשר';
+  if (status === 'follow_up') return 'מעקב לפי תזכורת';
+  if (status === 'new') return 'הצגת הצעת מחיר ראשונית';
+  if (aiSummary) {
+    // Extract first meaningful phrase from AI summary
+    const snippet = aiSummary.slice(0, 40).trim();
+    return snippet.length > 30 ? snippet.slice(0, 30) + '...' : snippet;
+  }
+  return 'בירור צרכים ועדכון';
+}
+
+// ============================================================
+// [Req #106] Relationship Strength — composite metric (0-100)
+// ============================================================
+
+/**
+ * Computes relationship strength based on:
+ * - Interaction frequency (higher = stronger)
+ * - Temperature (higher = stronger)
+ * - Days since last contact (lower = stronger)
+ * - Customer style (veteran > recurring > new)
+ */
+export function computeRelationshipStrength(
+  temperature: number,
+  daysSinceContact: number | null,
+  interactionCount: number,
+  customerStyle?: string | null,
+): number {
+  const dsc = daysSinceContact ?? 30;
+
+  // Temperature factor: 0-25 points (temp 1-5 scaled)
+  const tempFactor = Math.min(25, (temperature / 5) * 25);
+
+  // Recency factor: 0-30 points (recent contact = high)
+  const recencyFactor = dsc <= 1 ? 30 : dsc <= 3 ? 25 : dsc <= 7 ? 20 : dsc <= 14 ? 12 : dsc <= 30 ? 5 : 0;
+
+  // Interaction volume factor: 0-25 points
+  const volumeFactor = Math.min(25, interactionCount * 2.5);
+
+  // Style factor: 0-20 points
+  const styleFactor = customerStyle === 'veteran' ? 20
+    : customerStyle === 'recurring' ? 14
+    : customerStyle === 'new' ? 5
+    : customerStyle === 'one_time' ? 2
+    : 8; // unknown
+
+  return Math.min(100, Math.round(tempFactor + recencyFactor + volumeFactor + styleFactor));
+}

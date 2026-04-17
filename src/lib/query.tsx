@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { QueryClient, QueryClientProvider, onlineManager, type Mutation } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
 import { flushOfflineQueue, pendingMutationCount } from './offline-sync';
 import { globalToast } from './toast';
 
@@ -25,11 +25,14 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     const cache = qc.getMutationCache();
     cache.config = {
       ...cache.config,
-      onError: (error: Error, _variables: unknown, _context: unknown, mutation: Mutation) => {
+      // Global mutation error handler — catches ANY mutation that throws
+      // without its own onError callback. Shows a visible toast so failures
+      // are never silent.
+      onError: (error, _variables, _context, mutation) => {
         // Skip if the mutation already has its own onError (avoid double-toast)
         if (mutation.options.onError) return;
-        console.error('[mutation] Unhandled error:', error.message);
-        globalToast(`שגיאה: ${error.message}`, 'error');
+        console.error('[mutation] Unhandled error:', (error as Error).message);
+        globalToast(`שגיאה: ${(error as Error).message}`, 'error');
       },
     };
 

@@ -1,12 +1,23 @@
+// [Req #292] Auth context rewritten for local-first single-user desktop.
+// Supabase JWT auth REMOVED. Identity = hard-coded local user + SQLCipher unlock.
+// Login page now collects the passphrase; success = DB pool up, user = LOCAL_USER_ID.
+
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
+import { LOCAL_USER_ID, isDbInitialized, initializeDb, unlockDb } from './db';
 import type { Profile } from './database.types';
 
+// Minimal User shape to preserve call-site API (previously @supabase/supabase-js's User).
+export interface LocalUser {
+  id: string;
+  email: string;
+}
+
 interface AuthState {
-  user: User | null;
+  user: LocalUser | null;
   profile: Profile | null;
   loading: boolean;
+  /** [Req #292] Passphrase-based unlock. `email` retained as display-only. */
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
 }
@@ -14,60 +25,68 @@ interface AuthState {
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<LocalUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // Track which userId we already fetched to avoid duplicate calls
-  const fetchedRef = useRef<string | null>(null);
+  const bootstrappedRef = useRef(false);
 
   useEffect(() => {
-    // Listen for auth changes (also fires on initial load with current session)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      const authUser = session?.user ?? null;
-      setUser(authUser);
+    if (bootstrappedRef.current) return;
+    bootstrappedRef.current = true;
+    // Attempt auto-unlock if keyring already has passphrase
+    void bootstrap();
+  }, []);
 
-      if (authUser && fetchedRef.current !== authUser.id) {
-        fetchedRef.current = authUser.id;
-        fetchProfile(authUser.id);
-      } else if (!authUser) {
-        fetchedRef.current = null;
+  async function bootstrap() {
+    try {
+      if (await isDbInitialized()) {
+        await unlockDb();
+        await loadLocalSession();
+      } else {
+        setUser(null);
         setProfile(null);
         setLoading(false);
       }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  async function fetchProfile(userId: string) {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-
-    if (error) {
-      console.error('[auth] Failed to fetch profile:', error.message);
-      await supabase.auth.signOut();
+    } catch (e) {
+      console.warn('[auth] bootstrap failed:', e);
       setUser(null);
       setProfile(null);
       setLoading(false);
-      return;
     }
+  }
 
-    setProfile(data);
+  async function loadLocalSession() {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', LOCAL_USER_ID)
+      .maybeSingle();
+    if (error) console.warn('[auth] profile load error:', error.message);
+    setUser({ id: LOCAL_USER_ID, email: (data as Profile | null)?.email ?? 'local@proseal.local' });
+    setProfile((data as Profile | null) ?? null);
     setLoading(false);
   }
 
-  async function signIn(email: string, password: string) {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error: error ? new Error(error.message) : null };
+  // [Req #292] `email` ignored — retained so UI doesn't break. `password` is the passphrase.
+  async function signIn(_email: string, password: string) {
+    try {
+      if (!(await isDbInitialized())) {
+        await initializeDb(password);   // first-run: persist passphrase
+      } else {
+        await unlockDb();               // subsequent: use keyring
+      }
+      await loadLocalSession();
+      return { error: null };
+    } catch (e) {
+      return { error: e instanceof Error ? e : new Error(String(e)) };
+    }
   }
 
   async function signOut() {
-    // onAuthStateChange listener handles state cleanup
-    await supabase.auth.signOut();
+    // Local auth = nothing to revoke. Just clear in-memory state.
+    setUser(null);
+    setProfile(null);
+    setLoading(false);
   }
 
   return (

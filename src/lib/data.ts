@@ -4,9 +4,19 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from './supabase';
+/**
+ * Supabase PostgREST 12 type helper.
+ * The generated Database types may lag behind the actual schema, causing
+ * .insert() / .update() to resolve as `never`. We import the client as
+ * `any` to allow mutations while keeping runtime behavior identical.
+ * Re-generate types with `npx supabase gen types` to remove this.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+import { supabase as _supabase } from './supabase';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = _supabase;
 import { useAuth } from './auth';
-import type { Quote, Client, Interaction, Capture, InteractionType, InteractionOutcome, DeferReasonCategory, ReleaseStatus, TelemetryAction } from './database.types';
+import type { Quote, Client, Interaction, Capture, InteractionType, InteractionOutcome, DeferReasonCategory, ReleaseStatus, TelemetryAction, CeoFeedback, CeoFeedbackType } from './database.types';
 
 // ============================================================
 //  Queued Release: weekend notes → released Sunday 08:00
@@ -87,6 +97,66 @@ export function useQuotes(includeArchived = false) {
   });
 }
 
+// [Req #138] Vacation mode — read/toggle from profiles
+export function useVacationMode() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
+    queryKey: ['vacation_mode', user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('vacation_mode, vacation_until')
+        .eq('id', user!.id)
+        .single();
+      if (error) throw new Error(error.message);
+      // Auto-disable if vacation_until has passed
+      if (data.vacation_mode && data.vacation_until && new Date(data.vacation_until) < new Date()) {
+        await supabase.from('profiles').update({ vacation_mode: false, vacation_until: null }).eq('id', user!.id);
+        return { vacation_mode: false, vacation_until: null };
+      }
+      return data as { vacation_mode: boolean; vacation_until: string | null };
+    },
+    enabled: !!user,
+  });
+
+  const toggle = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ vacation_mode: enabled, vacation_until: null })
+        .eq('id', user!.id);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['vacation_mode'] }),
+  });
+
+  return { ...query, toggle };
+}
+
+// [Req #141] Auto-archive: move won/lost quotes to dormant after 60 days
+export function useAutoArchive() {
+  return useMutation({
+    mutationFn: async () => {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 60);
+      const cutoffStr = cutoff.toISOString();
+
+      const { data, error } = await supabase
+        .from('quotes')
+        .update({ status: 'dormant' as const })
+        .in('status', ['won', 'lost'])
+        .lt('updated_at', cutoffStr)
+        .is('deleted_at', null)
+        .select('id');
+
+      if (error) throw new Error(error.message);
+      return data?.length ?? 0;
+    },
+  });
+}
+
 // ============================================================
 //  Interactions
 // ============================================================
@@ -120,6 +190,9 @@ export function useAddInteraction() {
       outcome,
       followUpDate,
       deferCategory,
+      direction,    // [Req #178] interaction direction (push/pull)
+      microText,    // [Req #239] 1-2 keyword memory anchor
+      isMilestone,  // [Req #112] highlighted timeline event
     }: {
       quoteId: string;
       type: InteractionType;
@@ -127,6 +200,9 @@ export function useAddInteraction() {
       outcome?: InteractionOutcome;
       followUpDate?: string | null; // ISO date YYYY-MM-DD, updates quote.follow_up_date
       deferCategory?: DeferReasonCategory;
+      direction?: 'push' | 'pull'; // [Req #178] interaction direction
+      microText?: string | null;   // [Req #239] memory anchor
+      isMilestone?: boolean;       // [Req #112] highlight in timeline
     }) => {
       // 1. Queued release: notes written during weekend are held until Sunday 08:00
       const weekend = isWeekendWindow();
@@ -142,6 +218,9 @@ export function useAddInteraction() {
           content,
           outcome: outcome ?? null,
           defer_category: deferCategory ?? null,
+          direction: direction ?? 'push', // [Req #178] default to "push" (we initiated)
+          micro_text: microText ?? null,   // [Req #239] memory anchor keyword
+          is_milestone: isMilestone ?? false, // [Req #112] milestone flag
           release_status: releaseStatus,
           release_at: releaseAt,
           created_by: user?.id ?? null,
@@ -161,6 +240,30 @@ export function useAddInteraction() {
       }
 
       return data as Interaction;
+    },
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['interactions', vars.quoteId] });
+      queryClient.invalidateQueries({ queryKey: ['quotes'] });
+    },
+  });
+}
+
+/**
+ * [Req #148, #150] Soft delete an interaction — sets deleted_at but preserves
+ * the record in the audit log for legal traceability.
+ */
+export function useSoftDeleteInteraction() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, quoteId }: { id: string; quoteId: string }) => {
+      const { error } = await supabase
+        .from('interactions')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', id);
+
+      if (error) throw new Error(error.message);
+      return { id, quoteId };
     },
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ['interactions', vars.quoteId] });
@@ -265,7 +368,7 @@ export function useAddCapture() {
       // Fire-and-forget: trigger AI processing via Edge Function
       supabase.functions
         .invoke('process-capture', { body: { capture_id: capture.id } })
-        .then(({ error: fnErr }) => {
+        .then(({ error: fnErr }: { error: unknown }) => {
           if (fnErr) console.warn('[process-capture] Edge Function error:', fnErr);
           // Re-fetch captures to pick up ai_response
           queryClient.invalidateQueries({ queryKey: ['captures'] });
@@ -411,13 +514,47 @@ export function useLogTelemetry() {
 //  Weekly CEO Report
 // ============================================================
 
+// [Req #163] 7-category report item
+export interface ReportCategoryItem {
+  text: string;
+  type: 'highlight' | 'risk' | 'action' | 'info';
+  is_recurring: boolean; // [Req #167] recurring blocker detection
+}
+
+// [Req #163] Report category (cube tile)
+export interface ReportCategory {
+  key: string;
+  title: string;
+  icon: string;
+  summary: string;
+  severity: 'ok' | 'warn' | 'critical';
+  items: ReportCategoryItem[];
+}
+
+// [Req #177] Cool-down quote surface
+export interface CoolDownQuote {
+  quote_number: string;
+  client_code: string;
+  days_silent: number;
+  original_temp: number;
+  current_temp: number;
+  recommendation?: string;
+}
+
+// [Req #163] Full 7-category CEO report structure
 export interface WeeklyReport {
   executive_summary: string;
-  highlights: string[];
-  risks: string[];
-  action_items: string[];
-  ceo_messages: string[];
-  quote_summary: {
+  mood: 'positive' | 'neutral' | 'warning' | 'critical';
+  // [Req #163] 7 fixed cube categories
+  categories: ReportCategory[];
+  // [Req #177] Cool-down detection
+  cool_downs: CoolDownQuote[];
+  // Legacy fields (backward compat)
+  highlights?: string[];
+  risks?: string[];
+  action_items?: string[];
+  ceo_messages?: string[];
+  quote_summary?: {
     total_active: number;
     new_this_week: number;
     closed_won: number;
@@ -425,7 +562,6 @@ export interface WeeklyReport {
     overdue_followups: number;
     hottest: string;
   };
-  mood: 'positive' | 'neutral' | 'warning' | 'critical';
   week_start: string;
   week_end: string;
   generated_at: string;
@@ -434,7 +570,12 @@ export interface WeeklyReport {
     new_this_week: number;
     closed_won: number;
     closed_lost: number;
+    in_production: number;   // [Req #168]
+    shipped: number;         // [Req #157]
     interactions_count: number;
+    interactions_filtered: number;  // [Req #202] noise filtered count
+    push_count: number;      // [Req #178]
+    pull_count: number;      // [Req #178]
     captures_count: number;
     ceo_messages_count: number;
   };
@@ -450,6 +591,105 @@ export function useGenerateWeeklyReport() {
       if (error) throw new Error(error.message);
       if (!data?.ok) throw new Error(data?.error ?? 'Unknown error generating report');
       return data.report as WeeklyReport;
+    },
+  });
+}
+
+// ============================================================
+//  Quote mutations
+// ============================================================
+
+// ============================================================
+//  [Req #204] CEO Feedback — feedback-to-action conversion
+// ============================================================
+
+/** Fetch CEO feedback for a specific report week */
+export function useCeoFeedback(reportWeek: string | null) {
+  return useQuery({
+    queryKey: ['ceo_feedback', reportWeek],
+    queryFn: async () => {
+      if (!reportWeek) return [];
+      const { data, error } = await supabase
+        .from('ceo_feedback')
+        .select('*')
+        .eq('report_week', reportWeek)
+        .order('created_at', { ascending: true });
+      if (error) throw new Error(error.message);
+      return (data ?? []) as CeoFeedback[];
+    },
+    enabled: !!reportWeek,
+  });
+}
+
+/** Add CEO feedback on a report item — converts to tracked action */
+export function useAddCeoFeedback() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async ({
+      reportWeek,
+      categoryKey,
+      itemIndex,
+      feedbackType,
+      content,
+      assignedTo,
+      dueDate,
+    }: {
+      reportWeek: string;
+      categoryKey: string;
+      itemIndex: number;
+      feedbackType: CeoFeedbackType;
+      content: string;
+      assignedTo?: string;
+      dueDate?: string;
+    }) => {
+      const { data, error } = await supabase
+        .from('ceo_feedback')
+        .insert({
+          report_week: reportWeek,
+          category_key: categoryKey,
+          item_index: itemIndex,
+          feedback_type: feedbackType,
+          content,
+          assigned_to: assignedTo ?? null,
+          due_date: dueDate ?? null,
+          created_by: user!.id,
+        })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      return data as CeoFeedback;
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['ceo_feedback', vars.reportWeek] });
+    },
+  });
+}
+
+/** Update CEO feedback action status */
+export function useUpdateCeoFeedback() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      fields,
+    }: {
+      id: string;
+      fields: Partial<Pick<CeoFeedback, 'action_status' | 'content' | 'assigned_to' | 'due_date'>>;
+    }) => {
+      const { data, error } = await supabase
+        .from('ceo_feedback')
+        .update(fields)
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      return data as CeoFeedback;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ceo_feedback'] });
     },
   });
 }

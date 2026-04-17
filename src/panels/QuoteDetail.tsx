@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { cn, fmtDate, timeAgo, tempColor, tempLabel } from '@/lib/utils';
-import { STATUS_LABELS, STATUS_COLORS, INTERACTION_LABELS, STRATEGIC_RANK_LABELS, DEFER_REASON_LABELS } from '@/lib/constants';
+import { cn, fmtDate, timeAgo, tempColor, tempLabel, computePriorityScore, generateIceBreaker, deriveNextCallTopic, computeRelationshipStrength } from '@/lib/utils';
+import { STATUS_LABELS, STATUS_COLORS, INTERACTION_LABELS, STRATEGIC_RANK_LABELS, DEFER_REASON_LABELS, DIRECTION_LABELS, CHANNEL_LABELS, CUSTOMER_STYLE_LABELS } from '@/lib/constants';
+import type { PreferredChannel, CustomerStyle } from '@/lib/database.types';
 import { isTauri, copyToClipboard, openFileLocation } from '@/lib/tauri';
 import { useToast } from '@/lib/toast';
 import { detectSensitiveContent } from '@/lib/sanitization';
-import { useUpdateClient, useUpdateQuote, useAddInteraction } from '@/lib/data';
+import { useUpdateClient, useUpdateQuote, useAddInteraction, useSoftDeleteInteraction, useQuotes } from '@/lib/data';
 import InteractionLogger from '@/components/InteractionLogger';
 import type { Quote, Client, Interaction, InteractionType, QuoteStatus, DeferReasonCategory } from '@/lib/database.types';
 
@@ -82,6 +83,14 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
   const updateClient = useUpdateClient();
   const updateQuote = useUpdateQuote();
   const addInteraction = useAddInteraction();
+  const softDeleteInteraction = useSoftDeleteInteraction(); // [Req #148]
+
+  // [Req #103] Consolidated customer profile — all quotes for this client
+  const { data: allQuotes } = useQuotes(true); // include archived
+  const clientQuotes = quote.client
+    ? (allQuotes ?? []).filter((q) => q.client_id === quote.client_id && q.id !== quote.id)
+    : [];
+  const [showClientProfile, setShowClientProfile] = useState(false);
 
   const [activeLogger, setActiveLogger] = useState<InteractionType | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
@@ -90,6 +99,9 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [pendingLost, setPendingLost] = useState(false);
   const [lossReason, setLossReason] = useState('');
+  // [Req #121, #122] Win reason mandatory prompt
+  const [pendingWon, setPendingWon] = useState(false);
+  const [winReason, setWinReason] = useState('');
 
   // Defer panel
   const [showDeferPanel, setShowDeferPanel] = useState(false);
@@ -100,10 +112,50 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
   // Sales ammo
   const [newAmmoText, setNewAmmoText] = useState('');
 
+  // [Req #19] Deal-won celebration animation
+  const [showWonAnimation, setShowWonAnimation] = useState(false);
+
+  // [Req #82] "What's next?" prompt state — shown after logging an interaction
+  const [showNextStepPrompt, setShowNextStepPrompt] = useState(false);
+
+  // [Req #130] Quick follow-up scheduling from header
+  const [showQuickFollowUp, setShowQuickFollowUp] = useState(false);
+
   const rawTimeline = buildTimeline(interactions);
 
   // Latest ice-breaker tag from interactions
   const latestIceBreaker = [...interactions].reverse().find((ix) => ix.ice_breaker_tag)?.ice_breaker_tag;
+
+  // [Req #12, #81] Computed priority score
+  const priorityScore = computePriorityScore(
+    quote.temperature,
+    quote.days_since_contact,
+    quote.strategic_rank,
+    quote.client?.is_vip ?? false,
+    quote.follow_up_date,
+    quote.status,
+  );
+
+  // [Req #15] Auto-generated ice-breaker opener
+  const lastInteractionType = interactions.length > 0
+    ? [...interactions].reverse().find((ix) => ix.type !== 'system')?.type
+    : undefined;
+  const autoIceBreaker = generateIceBreaker(
+    quote.days_since_contact,
+    quote.client?.code ?? '',
+    lastInteractionType,
+  );
+
+  // [Req #5] Next call topic
+  const nextCallTopic = deriveNextCallTopic(
+    quote.status,
+    quote.temperature,
+    quote.days_since_contact,
+    quote.follow_up_date,
+    quote.sales_ammo,
+    quote.loss_reason,
+    quote.ai_summary,
+  );
 
   // ── Handlers ───────────────────────────────────────────────────────────
 
@@ -133,12 +185,21 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
   async function changeStatus(newStatus: QuoteStatus, reason?: string) {
     const fields: Partial<Quote> = { status: newStatus };
     if (newStatus === 'lost' && reason) fields.loss_reason = reason;
+    // [Req #121] Win reason mandatory on deal close
+    if (newStatus === 'won' && reason) fields.win_reason = reason;
     try {
       await updateQuote.mutateAsync({ id: quote.id, fields });
       toast(`סטטוס: ${STATUS_LABELS[newStatus]}`, 'success');
       setShowStatusMenu(false);
       setPendingLost(false);
       setLossReason('');
+      setPendingWon(false);
+      setWinReason('');
+      // [Req #19] Trigger celebration animation on deal won
+      if (newStatus === 'won') {
+        setShowWonAnimation(true);
+        setTimeout(() => setShowWonAnimation(false), 3000);
+      }
     } catch {
       toast('שגיאה בעדכון סטטוס', 'error');
     }
@@ -260,10 +321,151 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
     setActiveLogger('whatsapp');
   }
 
+  /**
+   * [Req #8] WhatsApp "Set & Forget": one-click send + auto-log interaction.
+   * Opens wa.me with pre-filled message AND immediately logs a WhatsApp
+   * interaction with the ice-breaker text, so the operator doesn't need
+   * to manually log the contact. True fire-and-forget.
+   */
+  async function whatsAppSetAndForget() {
+    if (!quote.client?.phone) return;
+    const msg = encodeURIComponent(autoIceBreaker);
+    window.open(`https://wa.me/${waPhone(quote.client.phone)}?text=${msg}`, '_blank');
+
+    // Auto-log the interaction silently
+    try {
+      await addInteraction.mutateAsync({
+        quoteId: quote.id,
+        type: 'whatsapp',
+        content: autoIceBreaker,
+        outcome: undefined,
+      });
+      toast('WA נשלח ונרשם', 'success');
+    } catch {
+      toast('WA נפתח אך הרישום נכשל', 'error');
+    }
+  }
+
+  /**
+   * [Req #7] Email template: opens mailto: with pre-filled subject and body.
+   * Uses the quote context to build a professional follow-up email template.
+   */
+  function openEmailTemplate() {
+    const clientName = quote.client?.code ?? '';
+    const subject = encodeURIComponent(`בהמשך להצעת מחיר ${quote.quote_number} — ${clientName}`);
+    const ammoSection = quote.sales_ammo.length > 0
+      ? '\n\nנקודות מרכזיות:\n' + quote.sales_ammo.map((a) => `• ${a}`).join('\n')
+      : '';
+    const body = encodeURIComponent(
+      `${autoIceBreaker},\n\n` +
+      `בהמשך להצעת מחיר מספר ${quote.quote_number} שנשלחה אליכם, ` +
+      `אשמח לקבל עדכון לגבי ההחלטה.` +
+      ammoSection +
+      `\n\nאשמח לעמוד לרשותכם לכל שאלה.\n\nבברכה`
+    );
+    window.open(`mailto:?subject=${subject}&body=${body}`, '_self');
+    setActiveLogger('email');
+  }
+
+  // [Req #117] Quick "no answer" one-click logging — skips the InteractionLogger entirely
+  async function quickNoAnswer() {
+    try {
+      await addInteraction.mutateAsync({
+        quoteId: quote.id,
+        type: 'call',
+        content: 'לא ענה',
+        outcome: 'no_answer',
+      });
+      toast('נרשם: לא ענה', 'success');
+      // [Req #82] Show "what's next?" prompt after logging
+      setShowNextStepPrompt(true);
+    } catch {
+      toast('שגיאה ברישום', 'error');
+    }
+  }
+
+  // [Req #114, #178] Client-initiated contact: logs a "pull" direction interaction
+  async function logClientInitiated() {
+    try {
+      await addInteraction.mutateAsync({
+        quoteId: quote.id,
+        type: 'call',
+        content: 'הלקוח יצר קשר',
+        outcome: 'reached',
+        direction: 'pull',
+      });
+      // Cancel pending follow-up if client reached out
+      if (quote.follow_up_date) {
+        await updateQuote.mutateAsync({
+          id: quote.id,
+          fields: { follow_up_date: null },
+        });
+      }
+      toast('נרשם: הלקוח יצר קשר', 'success');
+      setShowNextStepPrompt(true);
+    } catch {
+      toast('שגיאה ברישום', 'error');
+    }
+  }
+
+  // [Req #82] Handle "what's next?" prompt actions
+  function handleNextStepAction(action: 'followup' | 'defer' | 'note' | 'dismiss') {
+    setShowNextStepPrompt(false);
+    if (action === 'followup') setShowQuickFollowUp(true);
+    else if (action === 'defer') { setShowDeferPanel(true); setActiveLogger(null); }
+    else if (action === 'note') { setActiveLogger('note'); setShowDeferPanel(false); }
+    // dismiss = close prompt, do nothing
+  }
+
+  // [Req #130] Quick follow-up date setter from header
+  async function setQuickFollowUp(days: number) {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    const iso = d.toISOString().slice(0, 10);
+    try {
+      await updateQuote.mutateAsync({
+        id: quote.id,
+        fields: { follow_up_date: iso, status: quote.status === 'new' ? 'follow_up' : quote.status },
+      });
+      toast(`מעקב נקבע: ${iso}`, 'success');
+      setShowQuickFollowUp(false);
+    } catch {
+      toast('שגיאה בקביעת מעקב', 'error');
+    }
+  }
+
+  // [Req #82] Wrap the original logger close to trigger "what's next?"
+  function handleLoggerClose() {
+    setActiveLogger(null);
+    setShowNextStepPrompt(true);
+  }
+
+  // [Req #118] Visual age indicator — compute quote age in days
+  const quoteAgeDays = Math.floor(
+    (Date.now() - new Date(quote.opened_at).getTime()) / 86_400_000,
+  );
+
   // ── Render ─────────────────────────────────────────────────────────────
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
+      {/* [Req #19] Deal-won celebration overlay */}
+      {showWonAnimation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none animate-fade-in">
+          <div className="rounded-2xl bg-green-950/90 light:bg-green-50/95 border-2 border-green-500 px-12 py-8 text-center shadow-2xl">
+            <div className="text-5xl mb-3" style={{ animation: 'fadeIn 0.5s ease-out' }}>
+              ✓
+            </div>
+            <p className="text-2xl font-bold text-green-400 light:text-green-700">
+              עסקה נסגרה!
+            </p>
+            <p className="mt-1 text-sm text-green-400/70 light:text-green-600">
+              {quote.quote_number} — {quote.client?.code}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto">
         {/* ── Header ── */}
         <div className="border-b border-(--color-border) px-6 py-5">
@@ -305,6 +507,12 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
                           onClick={() => {
                             if (s === 'lost') {
                               setPendingLost(true);
+                              setPendingWon(false);
+                              setShowStatusMenu(false);
+                            } else if (s === 'won') {
+                              // [Req #121] Intercept — require win reason before closing
+                              setPendingWon(true);
+                              setPendingLost(false);
                               setShowStatusMenu(false);
                             } else {
                               changeStatus(s);
@@ -393,6 +601,37 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
             </div>
           )}
 
+          {/* [Req #121, #122] Win reason prompt — mandatory documentation before closing as won */}
+          {pendingWon && (
+            <div className="mt-3 rounded-lg border border-green-800 bg-green-950/20 light:border-green-200 light:bg-green-50 p-3 space-y-2 animate-fade-in">
+              <p className="text-xs font-bold text-green-400 light:text-green-700">סיבת זכייה</p>
+              <input
+                value={winReason}
+                onChange={(e) => setWinReason(e.target.value)}
+                autoFocus
+                placeholder="למה זכינו? (מחיר / שירות / קשר אישי / אחר)"
+                className="w-full rounded-lg border border-(--color-border) bg-(--color-surface) px-3 py-2 text-sm text-(--color-text) outline-none focus:border-green-400"
+                dir="rtl"
+                onKeyDown={(e) => e.key === 'Enter' && winReason.trim() && changeStatus('won', winReason.trim())}
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => winReason.trim() && changeStatus('won', winReason.trim())}
+                  disabled={!winReason.trim() || updateQuote.isPending}
+                  className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-30 hover:opacity-90"
+                >
+                  {updateQuote.isPending ? '...' : 'סמן כזכייה'}
+                </button>
+                <button
+                  onClick={() => { setPendingWon(false); setWinReason(''); }}
+                  className="text-xs text-(--color-text-secondary)/60 hover:text-(--color-text-secondary)"
+                >
+                  ביטול
+                </button>
+              </div>
+            </div>
+          )}
+
           <p className="mt-0.5 text-sm text-(--color-text-secondary)">
             {quote.client?.code ?? 'ללא לקוח'}
             {quote.client?.is_vip && (
@@ -400,11 +639,41 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
             )}
           </p>
 
-          {/* ── Ice-breaker tag ── */}
+          {/* [Req #12, #81] - Priority score badge */}
+          <div className="mt-2 flex items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold text-(--color-text-secondary)">ציון עדיפות:</span>
+              <span className={cn(
+                'text-xs font-bold rounded-full px-2 py-0.5',
+                priorityScore >= 80 ? 'bg-red-950/40 text-red-300 light:bg-red-100 light:text-red-700'
+                  : priorityScore >= 50 ? 'bg-orange-950/40 text-orange-300 light:bg-orange-100 light:text-orange-700'
+                    : priorityScore >= 30 ? 'bg-amber-950/40 text-amber-300 light:bg-amber-100 light:text-amber-700'
+                      : 'bg-zinc-800/40 text-zinc-400 light:bg-zinc-100 light:text-zinc-600',
+              )}>
+                {priorityScore}
+              </span>
+            </div>
+
+            {/* [Req #5] - Next call topic */}
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <span className="text-[10px] font-bold text-(--color-text-secondary) shrink-0">נושא הבא:</span>
+              <span className="text-[10px] text-(--color-accent) font-semibold truncate">{nextCallTopic}</span>
+            </div>
+          </div>
+
+          {/* ── Ice-breaker tag (manual from interactions) ── */}
           {latestIceBreaker && (
             <div className="mt-1.5 flex items-center gap-1.5">
               <span className="text-xs font-semibold text-violet-400 light:text-violet-600">שובר קרח:</span>
               <span className="text-xs text-(--color-text)">{latestIceBreaker}</span>
+            </div>
+          )}
+
+          {/* [Req #15] - Auto-generated ice-breaker opener */}
+          {!latestIceBreaker && (
+            <div className="mt-1.5 flex items-center gap-1.5">
+              <span className="text-[10px] font-semibold text-violet-400/60 light:text-violet-500">פתיח מוצע:</span>
+              <span className="text-[10px] text-(--color-text-secondary) italic">"{autoIceBreaker}"</span>
             </div>
           )}
 
@@ -433,16 +702,225 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
                 הפסד: {quote.loss_reason}
               </span>
             )}
+            {/* [Req #121] Display win reason */}
+            {quote.win_reason && (
+              <span className="text-green-400 light:text-green-600 font-semibold">
+                זכייה: {quote.win_reason}
+              </span>
+            )}
           </div>
 
+          {/* [Req #118] Visual age indicator — passive visual cue for quote age */}
+          <div className="mt-3 flex items-center gap-2">
+            <span className={cn(
+              'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold',
+              quoteAgeDays >= 30 ? 'bg-red-950/30 text-red-400 light:bg-red-50 light:text-red-600'
+                : quoteAgeDays >= 14 ? 'bg-orange-950/30 text-orange-400 light:bg-orange-50 light:text-orange-600'
+                  : quoteAgeDays >= 7 ? 'bg-amber-950/30 text-amber-400 light:bg-amber-50 light:text-amber-600'
+                    : 'bg-zinc-800/30 text-zinc-400 light:bg-zinc-100 light:text-zinc-500',
+            )}>
+              {quoteAgeDays >= 30 ? '⏳' : quoteAgeDays >= 14 ? '⏱' : ''}
+              גיל: {quoteAgeDays} ימים
+            </span>
+            {quoteAgeDays >= 14 && (
+              <span className="text-[10px] text-(--color-text-secondary)/50">
+                {quoteAgeDays >= 30 ? 'הצעה ותיקה — שקול סגירה' : 'הצעה בהתבגרות'}
+              </span>
+            )}
+          </div>
+
+          {/* [Req #101, #105, #104, #170, #268] — Client profile & quote overrides */}
+          {quote.client && (
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-[10px]">
+              {/* [Req #105] Preferred channel */}
+              <div className="flex items-center gap-1">
+                <span className="font-bold text-(--color-text-secondary)">ערוץ:</span>
+                <div className="flex gap-0.5">
+                  {(Object.entries(CHANNEL_LABELS) as [PreferredChannel, string][]).map(([ch, label]) => (
+                    <button
+                      key={ch}
+                      onClick={async () => {
+                        try {
+                          await updateClient.mutateAsync({ id: quote.client!.id, fields: { preferred_channel: ch } });
+                          toast(`ערוץ מועדף: ${label}`, 'success');
+                        } catch { toast('שגיאה בעדכון', 'error'); }
+                      }}
+                      className={cn(
+                        'rounded-full border px-2 py-0.5 font-semibold transition-colors',
+                        quote.client!.preferred_channel === ch
+                          ? 'border-(--color-accent) bg-(--color-accent)/10 text-(--color-accent)'
+                          : 'border-(--color-border) text-(--color-text-secondary)/50 hover:border-(--color-accent)/50',
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {/* [Req #101] Customer style */}
+              <div className="flex items-center gap-1">
+                <span className="font-bold text-(--color-text-secondary)">סוג:</span>
+                <div className="flex gap-0.5">
+                  {(Object.entries(CUSTOMER_STYLE_LABELS) as [CustomerStyle, string][]).map(([style, label]) => (
+                    <button
+                      key={style}
+                      onClick={async () => {
+                        try {
+                          await updateClient.mutateAsync({ id: quote.client!.id, fields: { customer_style: style } });
+                          toast(`סוג לקוח: ${label}`, 'success');
+                        } catch { toast('שגיאה בעדכון', 'error'); }
+                      }}
+                      className={cn(
+                        'rounded-full border px-2 py-0.5 font-semibold transition-colors',
+                        quote.client!.customer_style === style
+                          ? 'border-teal-500 bg-teal-950/20 text-teal-300 light:bg-teal-50 light:text-teal-700'
+                          : 'border-(--color-border) text-(--color-text-secondary)/50 hover:border-teal-500/50',
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {/* [Req #170] New customer flag */}
+              <button
+                onClick={async () => {
+                  try {
+                    await updateClient.mutateAsync({ id: quote.client!.id, fields: { is_new_customer: !quote.client!.is_new_customer } });
+                    toast(quote.client!.is_new_customer ? 'הוסר כחדש' : 'סומן כלקוח חדש', 'success');
+                  } catch { toast('שגיאה בעדכון', 'error'); }
+                }}
+                className={cn(
+                  'rounded-full border px-2 py-0.5 font-bold transition-colors',
+                  quote.client!.is_new_customer
+                    ? 'border-blue-500 bg-blue-950/20 text-blue-300 light:bg-blue-50 light:text-blue-700'
+                    : 'border-(--color-border) text-(--color-text-secondary)/50 hover:border-blue-500/50',
+                )}
+              >
+                {quote.client!.is_new_customer ? 'לקוח חדש ✓' : 'חדש?'}
+              </button>
+              {/* [Req #268] Temp override toggle */}
+              <button
+                onClick={async () => {
+                  try {
+                    await updateQuote.mutateAsync({ id: quote.id, fields: { temp_override: !quote.temp_override } });
+                    toast(quote.temp_override ? 'טמפרטורה חוזרת לאוטומטי' : 'טמפרטורה ידנית — לא תדעך', 'success');
+                  } catch { toast('שגיאה בעדכון', 'error'); }
+                }}
+                className={cn(
+                  'rounded-full border px-2 py-0.5 font-bold transition-colors',
+                  quote.temp_override
+                    ? 'border-red-500 bg-red-950/20 text-red-300 light:bg-red-50 light:text-red-700'
+                    : 'border-(--color-border) text-(--color-text-secondary)/50 hover:border-red-500/50',
+                )}
+                title={quote.temp_override ? 'טמפרטורה ידנית — לחץ לחזור לאוטומטי' : 'נעל טמפרטורה (לא ידעך אוטומטית)'}
+              >
+                {quote.temp_override ? '🔒 נעול' : '🔓 נעל טמפ׳'}
+              </button>
+            </div>
+          )}
+
+          {/* [Req #106] Relationship strength composite metric */}
+          {quote.client && (
+            <div className="mt-2 flex items-center gap-2 text-[10px]">
+              <span className="font-bold text-(--color-text-secondary)">חוזק קשר:</span>
+              {(() => {
+                const rs = computeRelationshipStrength(
+                  quote.temperature,
+                  quote.days_since_contact,
+                  interactions.length,
+                  quote.client?.customer_style,
+                );
+                return (
+                  <>
+                    <div className="flex-1 max-w-32 h-1.5 rounded-full bg-(--color-border)/30 overflow-hidden">
+                      <div
+                        className={cn(
+                          'h-full rounded-full transition-all',
+                          rs >= 70 ? 'bg-emerald-500' : rs >= 40 ? 'bg-amber-500' : 'bg-red-500',
+                        )}
+                        style={{ width: `${rs}%` }}
+                      />
+                    </div>
+                    <span className={cn(
+                      'font-bold',
+                      rs >= 70 ? 'text-emerald-400 light:text-emerald-600' : rs >= 40 ? 'text-amber-400 light:text-amber-600' : 'text-red-400 light:text-red-600',
+                    )}>
+                      {rs}%
+                    </span>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* [Req #115] Role tags — display client tags as privacy-safe role identifiers */}
+          {quote.client && quote.client.tags && quote.client.tags.length > 0 && (
+            <div className="mt-2 flex items-center gap-1.5 text-[10px] flex-wrap">
+              <span className="font-bold text-(--color-text-secondary)">תגיות:</span>
+              {quote.client.tags.map((tag, i) => (
+                <span key={i} className="rounded-full border border-(--color-border) bg-(--color-surface-dim) px-2 py-0.5 font-semibold text-(--color-text)">
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* [Req #114] Quick "contacted early" button — reset follow-up when you contact before reminder */}
+          {quote.follow_up_date && quote.follow_up_date > new Date().toISOString().slice(0, 10) && (
+            <div className="mt-2">
+              <button
+                onClick={async () => {
+                  try {
+                    await updateQuote.mutateAsync({ id: quote.id, fields: { follow_up_date: null } });
+                    toast('תזכורת מעקב בוטלה — יצרת קשר מוקדם', 'success');
+                  } catch { toast('שגיאה', 'error'); }
+                }}
+                className="rounded-lg border border-(--color-border) px-2.5 py-1 text-[10px] font-bold text-(--color-text-secondary) hover:bg-emerald-950/20 hover:text-emerald-400 hover:border-emerald-700 light:hover:bg-emerald-50 light:hover:text-emerald-600 transition-colors"
+              >
+                יצרתי קשר מוקדם — בטל תזכורת
+              </button>
+            </div>
+          )}
+
+          {/* [Req #103] Consolidated customer profile — all quotes for this client */}
+          {quote.client && clientQuotes.length > 0 && (
+            <div className="mt-2">
+              <button
+                onClick={() => setShowClientProfile(!showClientProfile)}
+                className="text-[10px] font-bold text-(--color-accent) hover:opacity-80 transition-opacity"
+              >
+                {showClientProfile ? '▲' : '▼'} {clientQuotes.length} הצעות נוספות ללקוח {quote.client.code}
+              </button>
+              {showClientProfile && (
+                <div className="mt-1.5 space-y-1 rounded-lg border border-(--color-border) bg-(--color-surface-dim) p-2">
+                  {clientQuotes.slice(0, 10).map((cq) => (
+                    <div key={cq.id} className="flex items-center gap-2 text-[10px]">
+                      <span className="font-semibold text-(--color-text)">{cq.quote_number}</span>
+                      <span className={cn('rounded-full px-1.5 py-0.5 font-bold', STATUS_COLORS[cq.status])}>
+                        {STATUS_LABELS[cq.status]}
+                      </span>
+                      <span className="text-(--color-text-secondary)">{timeAgo(cq.opened_at)}</span>
+                    </div>
+                  ))}
+                  {clientQuotes.length > 10 && (
+                    <span className="text-[9px] text-(--color-text-secondary)/50">ו-{clientQuotes.length - 10} נוספות...</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ── Action buttons ── */}
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap gap-2">
             {ACTION_BUTTONS.map((btn) => (
               <button
                 key={btn.type}
                 onClick={() => {
                   setActiveLogger(activeLogger === btn.type ? null : btn.type);
                   setShowDeferPanel(false);
+                  setShowNextStepPrompt(false);
+                  setShowQuickFollowUp(false);
                 }}
                 className={cn(
                   'rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors',
@@ -454,8 +932,26 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
                 {btn.label}
               </button>
             ))}
+            {/* [Req #117] Quick "no answer" one-click button */}
             <button
-              onClick={() => { setShowDeferPanel(!showDeferPanel); setActiveLogger(null); }}
+              onClick={quickNoAnswer}
+              disabled={addInteraction.isPending}
+              className="rounded-lg border border-zinc-600 px-3 py-1.5 text-xs font-medium text-zinc-400 light:text-zinc-500 hover:bg-zinc-900/30 light:hover:bg-zinc-100 transition-colors disabled:opacity-30"
+              title="רשום ניסיון שלא ענו — לחיצה אחת"
+            >
+              {addInteraction.isPending ? '...' : 'לא ענה'}
+            </button>
+            {/* [Req #114, #178] Client-initiated contact button */}
+            <button
+              onClick={logClientInitiated}
+              disabled={addInteraction.isPending}
+              className="rounded-lg border border-teal-700 light:border-teal-300 px-3 py-1.5 text-xs font-medium text-teal-400 light:text-teal-600 hover:bg-teal-950/20 light:hover:bg-teal-50 transition-colors disabled:opacity-30"
+              title="הלקוח התקשר / שלח הודעה — רשום כ'יוזמת לקוח'"
+            >
+              הלקוח יצר קשר
+            </button>
+            <button
+              onClick={() => { setShowDeferPanel(!showDeferPanel); setActiveLogger(null); setShowNextStepPrompt(false); setShowQuickFollowUp(false); }}
               className={cn(
                 'rounded-lg border px-3 py-1.5 text-xs font-medium text-(--color-warning) transition-colors',
                 showDeferPanel
@@ -465,6 +961,14 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
             >
               דחה
             </button>
+            {/* [Req #7] - Email template button */}
+            <button
+              onClick={openEmailTemplate}
+              className="rounded-lg border border-sky-700 light:border-sky-300 px-3 py-1.5 text-xs font-medium text-sky-400 light:text-sky-600 hover:bg-sky-950/20 light:hover:bg-sky-50 transition-colors"
+              title="פתח מייל עם תבנית מוכנה"
+            >
+              שלח מייל
+            </button>
             {quote.client?.phone && (
               <>
                 <button
@@ -472,6 +976,15 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
                   className="rounded-lg border border-emerald-700 light:border-emerald-300 px-3 py-1.5 text-xs font-medium text-emerald-400 light:text-emerald-600 hover:bg-emerald-950/20 light:hover:bg-emerald-50 transition-colors"
                 >
                   שלח WA
+                </button>
+                {/* [Req #8] - WhatsApp Set & Forget: one-click send + auto-log */}
+                <button
+                  onClick={whatsAppSetAndForget}
+                  disabled={addInteraction.isPending}
+                  className="rounded-lg border border-emerald-700 light:border-emerald-300 bg-emerald-950/30 light:bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-400 light:text-emerald-700 hover:bg-emerald-950/50 light:hover:bg-emerald-100 transition-colors disabled:opacity-40"
+                  title="שלח WA + תיעוד אוטומטי (לחיצה אחת)"
+                >
+                  {addInteraction.isPending ? '...' : 'WA שגר ושכח'}
                 </button>
                 {quote.sales_ammo.length > 0 && (
                   <button
@@ -546,8 +1059,55 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
           <InteractionLogger
             quoteId={quote.id}
             type={activeLogger}
-            onClose={() => setActiveLogger(null)}
+            onClose={handleLoggerClose} // [Req #82] Triggers "what's next?" prompt
           />
+        )}
+
+        {/* [Req #82] "What's next?" dynamic prompt — shown after logging an interaction */}
+        {showNextStepPrompt && !activeLogger && !showDeferPanel && (
+          <div className="border-t border-(--color-border) bg-(--color-surface-dim) px-6 py-3 animate-fade-in">
+            <p className="text-xs font-bold text-(--color-accent) mb-2">מה הצעד הבא?</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => handleNextStepAction('followup')}
+                className="rounded-lg border border-(--color-accent)/30 px-3 py-1.5 text-xs font-semibold text-(--color-accent) hover:bg-(--color-accent)/5 transition-colors"
+              >
+                קבע מעקב
+              </button>
+              <button
+                onClick={() => handleNextStepAction('defer')}
+                className="rounded-lg border border-(--color-warning)/30 px-3 py-1.5 text-xs font-semibold text-(--color-warning) hover:bg-(--color-warning)/5 transition-colors"
+              >
+                דחה
+              </button>
+              <button
+                onClick={() => handleNextStepAction('note')}
+                className="rounded-lg border border-(--color-border) px-3 py-1.5 text-xs font-semibold text-(--color-text-secondary) hover:bg-(--color-surface) transition-colors"
+              >
+                הוסף הערה
+              </button>
+              <button
+                onClick={() => handleNextStepAction('dismiss')}
+                className="text-xs text-(--color-text-secondary)/40 hover:text-(--color-text-secondary) transition-colors"
+              >
+                סיימתי
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* [Req #130] Quick follow-up date picker — shown from "what's next?" or header */}
+        {showQuickFollowUp && !activeLogger && !showDeferPanel && (
+          <div className="border-t border-(--color-border) bg-(--color-surface-dim) px-6 py-3 animate-fade-in">
+            <p className="text-xs font-bold text-(--color-text-secondary) mb-2">קבע תאריך מעקב</p>
+            <div className="flex flex-wrap gap-1.5">
+              <button onClick={() => setQuickFollowUp(1)} className="rounded-full border border-(--color-accent)/30 px-3 py-1 text-xs font-semibold text-(--color-accent) hover:bg-(--color-accent)/5 transition-colors">מחר</button>
+              <button onClick={() => setQuickFollowUp(2)} className="rounded-full border border-(--color-border) px-3 py-1 text-xs font-semibold text-(--color-text-secondary) hover:bg-(--color-surface) transition-colors">בעוד יומיים</button>
+              <button onClick={() => setQuickFollowUp(7)} className="rounded-full border border-(--color-border) px-3 py-1 text-xs font-semibold text-(--color-text-secondary) hover:bg-(--color-surface) transition-colors">בשבוע</button>
+              <button onClick={() => setQuickFollowUp(14)} className="rounded-full border border-(--color-border) px-3 py-1 text-xs font-semibold text-(--color-text-secondary) hover:bg-(--color-surface) transition-colors">שבועיים</button>
+              <button onClick={() => setShowQuickFollowUp(false)} className="text-xs text-(--color-text-secondary)/40 hover:text-(--color-text-secondary) transition-colors mr-2">ביטול</button>
+            </div>
+          </div>
         )}
 
         {/* ── Conditional Defer panel (requires reason category) ── */}
@@ -672,7 +1232,18 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
               {rawTimeline.map((row, idx) => {
                 if (row.kind === 'single') {
                   return (
-                    <SingleInteractionRow key={row.interaction.id} ix={row.interaction} />
+                    <SingleInteractionRow
+                      key={row.interaction.id}
+                      ix={row.interaction}
+                      onSoftDelete={() => {
+                        // [Req #148] Soft delete with undo-style confirmation
+                        softDeleteInteraction.mutate(
+                          { id: row.interaction.id, quoteId: quote.id },
+                          { onSuccess: () => toast('הערה נמחקה (שמורה ביומן ביקורת)', 'success') },
+                        );
+                      }}
+                      isDeleting={softDeleteInteraction.isPending}
+                    />
                   );
                 }
 
@@ -713,12 +1284,14 @@ export default function QuoteDetail({ quote, interactions }: QuoteDetailProps) {
 
 // ── Single timeline row ────────────────────────────────────────────────────
 
-function SingleInteractionRow({ ix }: { ix: Interaction }) {
+function SingleInteractionRow({ ix, onSoftDelete, isDeleting }: { ix: Interaction; onSoftDelete?: () => void; isDeleting?: boolean }) {
   const isPending = ix.release_status === 'pending';
 
   return (
     <div className={cn(
-      'flex gap-3 border-r-2 pr-4 pb-4',
+      'flex gap-3 border-r-2 pr-4 pb-4 group/row',
+      // [Req #112] Milestone events get a highlighted border
+      ix.is_milestone ? 'border-violet-500 light:border-violet-400' :
       isPending ? 'border-amber-700 light:border-amber-300 opacity-60' : 'border-(--color-border)',
     )}>
       <div className="min-w-0 flex-1">
@@ -744,12 +1317,41 @@ function SingleInteractionRow({ ix }: { ix: Interaction }) {
               {DEFER_REASON_LABELS[ix.defer_category]}
             </span>
           )}
+          {/* [Req #178] Direction indicator — pull (client-initiated) gets visual marker */}
+          {ix.direction === 'pull' && (
+            <span className="text-[10px] font-semibold text-teal-400 light:text-teal-600 bg-teal-950/20 light:bg-teal-50 px-1.5 py-0.5 rounded">
+              {DIRECTION_LABELS.pull}
+            </span>
+          )}
+          {/* [Req #112] Milestone badge */}
+          {ix.is_milestone && (
+            <span className="text-[10px] font-bold text-violet-400 light:text-violet-600 bg-violet-950/20 light:bg-violet-50 px-1.5 py-0.5 rounded">
+              ★ אבן דרך
+            </span>
+          )}
           <span className="text-xs text-(--color-text-secondary)">{timeAgo(ix.created_at)}</span>
         </div>
         {ix.content && ix.content !== 'לא ענה' && (
           <p className="mt-0.5 text-sm text-(--color-text)">{ix.content}</p>
         )}
+        {/* [Req #239] Micro-text memory anchor */}
+        {ix.micro_text && (
+          <p className="mt-0.5 text-[10px] font-semibold text-amber-400 light:text-amber-600">
+            🔖 {ix.micro_text}
+          </p>
+        )}
       </div>
+      {/* [Req #148] Soft delete button — visible on hover, hidden by default */}
+      {onSoftDelete && ix.type !== 'system' && (
+        <button
+          onClick={onSoftDelete}
+          disabled={isDeleting}
+          className="shrink-0 self-start opacity-0 group-hover/row:opacity-100 text-[10px] text-(--color-text-secondary)/30 hover:text-red-500 transition-all disabled:opacity-20"
+          title="מחק הערה (נשמר ביומן ביקורת)"
+        >
+          ✕
+        </button>
+      )}
     </div>
   );
 }

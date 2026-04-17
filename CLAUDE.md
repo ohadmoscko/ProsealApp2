@@ -1,31 +1,23 @@
-# Proseal Brain
+# Proseal Brain - System & Operational Rules
 
-Tauri v2 desktop app + React SPA for quote management and weekly CEO reports.
+## 1. Project Stack & Architecture
+- **Frontend:** React 19 + TypeScript + Tailwind CSS v4 + TanStack Query + Vite
+- **Desktop:** Tauri v2 (Rust backend) - Desktop-First (No Web fallback).
+- **Architecture Paradigm:** Local-First / Offline-First. Embedded SQLite via Tauri (CSV #225, #245) with background cloud sync. 
+- **AI Integration:** Local LLM / Sanitized API calls (Financial data MUST be hard-blocked locally before API calls - CSV #301).
 
-## Stack
-- **Frontend**: React 19 + TypeScript + Tailwind CSS v4 + TanStack Query + Vite
-- **Desktop**: Tauri v2 (Rust backend)
-- **Database**: Supabase (PostgreSQL + Auth + RLS)
-- **AI**: Claude API (via Supabase Edge Functions)
+## 2. Communication Protocol: CAVEMAN MODE 
+Act as Caveman-Compress. Optimize all outputs to save tokens.
+- Fragment sentences only. Drop articles (a, an, the).
+- Drop pleasantries ("I will fix this", "Here is the code").
+- Code blocks and CLI commands must remain 100% exact and uncompressed.
+- "Fix" not "implement a solution for". 
+- Provide output, await confirmation. No explanations unless explicitly requested.
 
-## Dev commands
-- `npm run dev` — Vite dev server (web only, port 1420)
-- `npm run tauri dev` — Tauri desktop app with HMR
-- `npm run build` — Production build (web)
-- `npm run tauri build` — Production desktop build
-
-## Project structure
-- `src/` — React frontend (shared between web and desktop)
-- `src-tauri/` — Rust backend (Tauri commands, local file access)
-- `supabase/migrations/` — Database migrations (010+)
-- `src/lib/` — Supabase client, auth, types, utilities
-- `src/layouts/` — Layout components (SplitView)
-- `src/panels/` — Main panels (QuoteList, QuoteDetail, CaptureChat)
-- `src/components/` — Shared components (Topbar, CaptureBar, CopilotBriefing)
-- `src/pages/` — Page components (Login, Dashboard)
-
-## Database
-Extends existing proseal-app schema (migrations 001-007). New tables: clients, quotes, interactions, captures, saved_filters (migrations 010-012).
-
-## Language
-UI is in Hebrew (RTL). Code is in English.
+## 3. Execution Protocol: SPARC METHODOLOGY
+Always utilize SPARC (Specification, Planning, Architecture, Review, Code) tools via MCP or NPX CLI for tasks.
+- Use `orchestrator` for sprint planning.
+- Use `architect` before writing new modules.
+- Use `coder` for implementation.
+- Use `reviewer` to check against CSV requirements.
+- Use `mcp__claude-flow__swarm_init` for complex multi-agent tasks.

@@ -40,6 +40,16 @@ export default function CopilotBriefing({ quotes, onFocusQuote }: CopilotBriefin
   );
   const waitingQuotes = quotes.filter((q) => q.status === 'waiting');
 
+  // [Req #123] Internal bottleneck detection: quotes stuck in 'waiting' for 3+ days
+  const bottlenecks = quotes.filter(
+    (q) => q.status === 'waiting' && (q.days_since_contact ?? 0) >= 3 && active(q),
+  );
+
+  // [Req #125] 6-month dormant customer alert: last contact > 180 days
+  const dormant6m = quotes.filter(
+    (q) => (q.days_since_contact ?? 0) >= 180 && !['won', 'lost', 'dormant'].includes(q.status),
+  );
+
   // Build briefing lines
   const lines: { text: string; quoteId?: string; severity: 'danger' | 'warn' | 'info' | 'muted' }[] = [];
 
@@ -100,6 +110,36 @@ export default function CopilotBriefing({ quotes, onFocusQuote }: CopilotBriefin
       text: `${waitingQuotes.length} ממתינות לתגובת לקוח`,
       severity: 'muted',
     });
+  }
+
+  // [Req #123] Internal bottleneck detection
+  if (bottlenecks.length > 0) {
+    lines.push({
+      text: `${bottlenecks.length} הצעות תקועות (ממתינות 3+ ימים — צוואר בקבוק פנימי)`,
+      severity: 'warn',
+    });
+    for (const q of bottlenecks.slice(0, 2)) {
+      lines.push({
+        text: `${q.quote_number} — ממתינה ${q.days_since_contact} ימים`,
+        quoteId: q.id,
+        severity: 'warn',
+      });
+    }
+  }
+
+  // [Req #125] 6-month dormant customer alert
+  if (dormant6m.length > 0) {
+    lines.push({
+      text: `${dormant6m.length} הצעות רדומות (180+ ימים ללא קשר) — שקול ארכוב`,
+      severity: 'danger',
+    });
+    for (const q of dormant6m.slice(0, 2)) {
+      lines.push({
+        text: `${q.quote_number} (${q.client?.code ?? '?'}) — ${q.days_since_contact} ימים`,
+        quoteId: q.id,
+        severity: 'danger',
+      });
+    }
   }
 
   const activeCount = quotes.filter(

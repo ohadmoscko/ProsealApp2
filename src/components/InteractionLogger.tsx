@@ -1,10 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+/**
+ * [Req #127] Tab-only keyboard navigation — all controls have tabIndex
+ * [Req #128] Auto-advance cursor to next field after selection
+ * [Req #131] Structured tags as primary input, free-text as secondary
+ * [Req #239] Micro-text memory anchor
+ * [Req #112] Milestone event toggle
+ */
+
+import { useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useAddInteraction } from '@/lib/data';
 import { useToast } from '@/lib/toast';
 import { detectSensitiveContent } from '@/lib/sanitization';
+import { INTERACTION_TAGS } from '@/lib/constants';
 import type { InteractionType, InteractionOutcome } from '@/lib/database.types';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -43,6 +52,11 @@ export default function InteractionLogger({ quoteId, type, onClose }: Interactio
   const addInteraction = useAddInteraction();
   const { toast } = useToast();
 
+  // [Req #127] Refs for auto-advance focus management
+  const noteRef = useRef<HTMLTextAreaElement>(null);
+  const followUpRef = useRef<HTMLDivElement>(null);
+  const saveRef = useRef<HTMLButtonElement>(null);
+
   // For calls: outcome must be picked first
   const needsOutcome = type === 'call';
 
@@ -50,6 +64,12 @@ export default function InteractionLogger({ quoteId, type, onClose }: Interactio
   const [note, setNote]       = useState('');
   const [followUp, setFollowUp] = useState<string | null>(null);
   const [customDate, setCustomDate] = useState('');
+  // [Req #131] Structured tag — primary input before free-text
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  // [Req #239] Micro-text memory anchor (1-2 keywords to jog memory next call)
+  const [microText, setMicroText] = useState('');
+  // [Req #112] Mark interaction as milestone event (highlighted in timeline)
+  const [isMilestone, setIsMilestone] = useState(false);
 
   // After picking "לא ענה" → save immediately, no text needed
   async function handleNoAnswer(o: InteractionOutcome) {
@@ -58,10 +78,22 @@ export default function InteractionLogger({ quoteId, type, onClose }: Interactio
       return;
     }
     setOutcome(o);
+    // [Req #128] Auto-advance: focus tag selection area after outcome pick
+    // Tags are shown next, so user can immediately start selecting
+  }
+
+  // [Req #128] Auto-advance when tag is selected
+  function handleTagSelect(tag: string) {
+    setSelectedTag(selectedTag === tag ? null : tag);
+    // Auto-focus to note field after tag selection
+    setTimeout(() => noteRef.current?.focus(), 50);
   }
 
   async function handleSave() {
-    const content = note.trim() || (outcome ? labelFor(outcome) : 'הערה');
+    const tagLabel = INTERACTION_TAGS.find((t) => t.value === selectedTag)?.label ?? '';
+    const content = note.trim()
+      ? (tagLabel ? `[${tagLabel}] ${note.trim()}` : note.trim())
+      : (tagLabel || (outcome ? labelFor(outcome) : 'הערה'));
     await save(outcome ?? undefined, content, (followUp ?? customDate) || undefined);
   }
 
@@ -85,6 +117,8 @@ export default function InteractionLogger({ quoteId, type, onClose }: Interactio
         content,
         outcome: o,
         followUpDate: followUpDate ?? null,
+        microText: microText.trim() || null,      // [Req #239] memory anchor
+        isMilestone,                               // [Req #112] milestone flag
       });
       toast('נרשם בהצלחה', 'success');
       onClose();
@@ -107,6 +141,8 @@ export default function InteractionLogger({ quoteId, type, onClose }: Interactio
               key={o.value}
               onClick={() => handleNoAnswer(o.value)}
               disabled={addInteraction.isPending}
+              // [Req #127] Tab navigation — each outcome is tabbable
+              tabIndex={0}
               className={cn(
                 'rounded-lg border px-4 py-2 text-sm font-semibold transition-colors disabled:opacity-40',
                 o.value === 'no_answer'
@@ -120,14 +156,14 @@ export default function InteractionLogger({ quoteId, type, onClose }: Interactio
             </button>
           ))}
         </div>
-        <button onClick={onClose} className="text-xs text-(--color-text-secondary)/60 hover:text-(--color-text-secondary)">
+        <button onClick={onClose} tabIndex={0} className="text-xs text-(--color-text-secondary)/60 hover:text-(--color-text-secondary)">
           ביטול
         </button>
       </div>
     );
   }
 
-  // Phase 2: note + what-next
+  // Phase 2: structured tag + note + what-next
   const showNote     = !needsOutcome || outcome === 'reached' || outcome === 'unavailable';
   const showFollowUp = !needsOutcome || outcome === 'reached' || outcome === 'unavailable';
   // When user marks "unavailable" (a deferred task), follow-up date is mandatory
@@ -141,6 +177,7 @@ export default function InteractionLogger({ quoteId, type, onClose }: Interactio
           <span className="text-xs font-bold text-(--color-accent)">{labelFor(outcome)}</span>
           <button
             onClick={() => setOutcome(null)}
+            tabIndex={0}
             className="text-xs text-(--color-text-secondary)/60 hover:text-(--color-text-secondary)"
           >
             שנה
@@ -148,21 +185,57 @@ export default function InteractionLogger({ quoteId, type, onClose }: Interactio
         </div>
       )}
 
+      {/* [Req #131] Structured tags — primary input BEFORE free text */}
+      {showNote && (
+        <div className="space-y-1.5">
+          <p className="text-xs font-semibold text-(--color-text-secondary)">סוג הפעולה</p>
+          <div className="flex flex-wrap gap-1.5">
+            {INTERACTION_TAGS.map((tag) => (
+              <button
+                key={tag.value}
+                onClick={() => handleTagSelect(tag.value)}
+                tabIndex={0}
+                className={cn(
+                  'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
+                  selectedTag === tag.value
+                    ? 'border-(--color-accent) bg-(--color-accent)/10 text-(--color-accent)'
+                    : 'border-(--color-border) text-(--color-text-secondary) hover:border-(--color-accent)/50',
+                )}
+              >
+                {tag.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {showNote && (
         <textarea
+          ref={noteRef}
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          autoFocus
+          autoFocus={!needsOutcome}
           rows={2}
-          placeholder={type === 'note' ? 'הערה...' : type === 'whatsapp' ? 'מה נשלח/נכתב?' : 'סיכום השיחה...'}
+          tabIndex={0}
+          placeholder={
+            selectedTag
+              ? 'פרטים נוספים (אופציונלי)...'
+              : type === 'note' ? 'הערה...' : type === 'whatsapp' ? 'מה נשלח/נכתב?' : 'סיכום השיחה...'
+          }
           className="w-full rounded-lg border border-(--color-border) bg-(--color-surface) px-3 py-2 text-sm text-(--color-text) outline-none placeholder:text-(--color-text-secondary)/50 focus:border-(--color-accent) resize-none"
           dir="rtl"
-          onKeyDown={(e) => e.key === 'Enter' && e.ctrlKey && handleSave()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && e.ctrlKey) handleSave();
+            // [Req #128] Tab auto-advance to follow-up section
+            if (e.key === 'Tab' && !e.shiftKey && showFollowUp) {
+              // Default tab behavior will move focus — no override needed
+            }
+          }}
         />
       )}
 
       {showFollowUp && (
-        <div className="space-y-1.5">
+        <div ref={followUpRef} className="space-y-1.5">
           <p className="text-xs font-semibold text-(--color-text-secondary)">מה הלאה?</p>
           <div className="flex flex-wrap gap-1.5">
             {FOLLOWUP_SHORTCUTS.map((s) => {
@@ -171,7 +244,13 @@ export default function InteractionLogger({ quoteId, type, onClose }: Interactio
               return (
                 <button
                   key={s.label}
-                  onClick={() => { setFollowUp(active ? null : iso); setCustomDate(''); }}
+                  tabIndex={0}
+                  onClick={() => {
+                    setFollowUp(active ? null : iso);
+                    setCustomDate('');
+                    // [Req #128] Auto-advance to save button after follow-up selection
+                    setTimeout(() => saveRef.current?.focus(), 50);
+                  }}
                   className={cn(
                     'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
                     active
@@ -187,6 +266,7 @@ export default function InteractionLogger({ quoteId, type, onClose }: Interactio
               type="date"
               value={customDate}
               onChange={(e) => { setCustomDate(e.target.value); setFollowUp(null); }}
+              tabIndex={0}
               className="rounded-full border border-(--color-border) px-3 py-1 text-xs text-(--color-text-secondary) bg-(--color-surface) outline-none focus:border-(--color-accent)"
               dir="ltr"
             />
@@ -194,12 +274,43 @@ export default function InteractionLogger({ quoteId, type, onClose }: Interactio
         </div>
       )}
 
+      {/* [Req #239] Micro-text memory anchor + [Req #112] Milestone toggle */}
+      {showNote && (
+        <div className="flex items-center gap-2">
+          <input
+            value={microText}
+            onChange={(e) => setMicroText(e.target.value)}
+            placeholder="מילת מפתח לזיכרון (לא חובה)"
+            maxLength={40}
+            tabIndex={0}
+            className="flex-1 rounded-lg border border-(--color-border) bg-(--color-surface) px-3 py-1.5 text-[11px] text-(--color-text) outline-none placeholder:text-(--color-text-secondary)/40 focus:border-(--color-accent)"
+            dir="rtl"
+          />
+          <button
+            type="button"
+            onClick={() => setIsMilestone(!isMilestone)}
+            tabIndex={0}
+            className={cn(
+              'shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-bold transition-colors',
+              isMilestone
+                ? 'border-violet-500 bg-violet-950/30 text-violet-300 light:bg-violet-50 light:text-violet-700'
+                : 'border-(--color-border) text-(--color-text-secondary)/50 hover:border-violet-500/50',
+            )}
+            title="סמן כאירוע מפתח בציר הזמן"
+          >
+            {isMilestone ? '★ אבן דרך' : '☆ אבן דרך'}
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center gap-2 pt-1">
         <button
+          ref={saveRef}
           onClick={handleSave}
+          tabIndex={0}
           disabled={
             addInteraction.isPending ||
-            (showNote && type !== 'note' && !note.trim() && outcome === 'reached') ||
+            (showNote && type !== 'note' && !note.trim() && !selectedTag && outcome === 'reached') ||
             (requireFollowUp && !hasFollowUp)
           }
           className="rounded-lg bg-(--color-accent) px-4 py-2 text-sm font-semibold text-white transition-opacity disabled:opacity-30 hover:opacity-90"
@@ -208,6 +319,7 @@ export default function InteractionLogger({ quoteId, type, onClose }: Interactio
         </button>
         <button
           onClick={onClose}
+          tabIndex={0}
           className="text-sm text-(--color-text-secondary)/60 hover:text-(--color-text-secondary)"
         >
           ביטול

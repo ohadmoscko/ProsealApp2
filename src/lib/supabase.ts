@@ -1,13 +1,18 @@
-import { createClient } from '@supabase/supabase-js';
-import type { Database } from './database.types';
+/**
+ * [Req #225, #243, #245, #292] DEPRECATED Supabase re-export shim.
+ *
+ * Per ADR-003, the Proseal Brain is now local-first on Tauri-embedded SQLite.
+ * This file used to initialise a `@supabase/supabase-js` client. It now
+ * re-exports the local SQLite-backed facade under the same `supabase` name so
+ * the rest of the codebase (data.ts, auth.tsx, hooks.ts, components/*) keeps
+ * working without touching every call-site.
+ *
+ * Do NOT add new imports from this file. Use `./db` directly going forward.
+ */
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// [Req #225] Legacy name → local facade
+export { db as supabase } from './db';
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error(
-    'Missing Supabase env vars. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env',
-  );
-}
-
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+// Legacy Database type lives in database.types.ts; keep re-export for type
+// compatibility with older callers. Runtime Database shape is unused.
+export type { Database } from './database.types';

@@ -7,7 +7,8 @@
 export const isTauri = '__TAURI_INTERNALS__' in window;
 
 /** Invoke a Tauri command with fallback for web dev */
-async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+// [Req #225] Exported so db.ts facade can reach Rust SQLite bridge
+export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   if (!isTauri) {
     console.warn(`[tauri] Not in Tauri — skipping command: ${cmd}`);
     throw new Error('Not running in Tauri');
